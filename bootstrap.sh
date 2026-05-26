@@ -154,7 +154,6 @@ collect_node_ips() {
             default_ip="10.10.10.2${i}"
         fi
         ask_inline node_ip "${role_label} ${i}" "$default_ip"
-        echo
         ensure_ipv4 "$node_ip" "${role_label} ${i}"
         collected_ips+=("$node_ip")
     done
@@ -211,8 +210,8 @@ ask HOSTNAME_CLUSTER_NUMBER "Cluster number" "" \
 # ─── 2 / 5  Node Topology ─────────────────────────────────────────────────────
 section "Node Topology"
 
-ask_inline MASTER_COUNT "Master nodes" "3"; echo
-ask_inline WORKER_COUNT "Worker nodes" "6"; echo
+ask_inline MASTER_COUNT "Master nodes" "3"
+ask_inline WORKER_COUNT "Worker nodes" "6"
 
 ensure_positive_integer "$MASTER_COUNT" "Master nodes"
 ensure_positive_integer "$WORKER_COUNT"  "Worker nodes"
@@ -267,9 +266,9 @@ fi
 # ─── 5 / 5  Cluster Network ───────────────────────────────────────────────────
 section "Cluster Network"
 
-ask_inline K8S_VERSION "Kubernetes version" "1.36.0";       echo
-ask_inline POD_CIDR     "Pod CIDR"           "10.244.0.0/16"; echo
-ask_inline SERVICE_CIDR "Service CIDR"       "10.96.0.0/12";  echo
+ask_inline K8S_VERSION "Kubernetes version" "1.36.0";
+ask_inline POD_CIDR     "Pod CIDR"           "10.244.0.0/16";
+ask_inline SERVICE_CIDR "Service CIDR"       "10.96.0.0/12"; 
 echo
 
 ask CALICO_IP_AUTODETECTION "Calico IP autodetection" "first-found" \
