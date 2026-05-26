@@ -1,0 +1,27 @@
+---
+- name: Install HAProxy from offline packages
+  shell: yum localinstall -y /tmp/k8s-packages/haproxy*.rpm
+  when:
+    - airgap.enabled | bool
+    - ansible_os_family == "RedHat"
+  ignore_errors: yes
+
+- name: Install HAProxy DEB package offline on Debian/Ubuntu
+  shell: DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/k8s-packages/haproxy*.deb
+  when:
+    - airgap.enabled | bool
+    - ansible_os_family == "Debian"
+  ignore_errors: yes
+
+- name: Configure HAProxy
+  template:
+    src: haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+    mode: '0644'
+  notify: restart haproxy
+
+- name: Enable and start HAProxy
+  systemd:
+    name: haproxy
+    state: started
+    enabled: yes

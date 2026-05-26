@@ -1,0 +1,8 @@
+---
+profile: production
+exclude_paths:
+  - .github/
+  - docs/
+  - hack/
+warn_list:
+  - experimental

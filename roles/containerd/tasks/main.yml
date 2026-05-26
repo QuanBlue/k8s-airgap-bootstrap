@@ -1,0 +1,180 @@
+---
+- name: Ensure offline packages directory exists
+  file:
+    path: /tmp/k8s-packages
+    state: directory
+
+- name: Ensure offline binaries directory exists
+  file:
+    path: /tmp/k8s-bin
+    state: directory
+
+- name: Copy containerd offline packages (RPMs)
+  copy:
+    src: "{{ airgap.artifacts_dir }}/packages/"
+    dest: /tmp/k8s-packages/
+  when: airgap.enabled | bool
+
+- name: Copy installer binaries bundle
+  copy:
+    src: "{{ airgap.artifacts_dir }}/bin/"
+    dest: /tmp/k8s-bin/
+  when: airgap.enabled | bool
+
+- name: Find containerd binary archive
+  find:
+    paths: /tmp/k8s-bin
+    patterns: "containerd-*-linux-amd64.tar.gz"
+    file_type: file
+  register: containerd_binary_archive
+  when: airgap.enabled | bool
+
+- name: Find crictl binary archive
+  find:
+    paths: /tmp/k8s-bin
+    patterns: "crictl-*-linux-amd64.tar.gz"
+    file_type: file
+  register: crictl_binary_archive
+  when: airgap.enabled | bool
+
+- name: Check for runc binary
+  stat:
+    path: /tmp/k8s-bin/runc.amd64
+  register: runc_binary
+  when: airgap.enabled | bool
+
+- name: Install containerd from binary archive
+  unarchive:
+    src: "{{ containerd_binary_archive.files[0].path }}"
+    dest: /usr/local
+    remote_src: true
+  when:
+    - airgap.enabled | bool
+    - containerd_binary_archive.matched | default(0) | int > 0
+
+- name: Install runc binary
+  copy:
+    src: /tmp/k8s-bin/runc.amd64
+    dest: /usr/local/sbin/runc
+    remote_src: true
+    mode: '0755'
+  when:
+    - airgap.enabled | bool
+    - runc_binary.stat.exists | default(false)
+
+- name: Install crictl from binary archive
+  unarchive:
+    src: "{{ crictl_binary_archive.files[0].path }}"
+    dest: /usr/local/bin
+    remote_src: true
+  when:
+    - airgap.enabled | bool
+    - crictl_binary_archive.matched | default(0) | int > 0
+
+- name: Install containerd from offline packages when binary archive is unavailable
+  shell: |
+    set -- /tmp/k8s-packages/containerd*.rpm /tmp/k8s-packages/containerd.io*.rpm /tmp/k8s-packages/runc*.rpm
+    if [ -e "$1" ]; then
+      yum localinstall -y "$@"
+    fi
+  when:
+    - airgap.enabled | bool
+    - ansible_os_family == "RedHat"
+    - containerd_binary_archive.matched | default(0) | int == 0
+  ignore_errors: yes # Ignore if already installed or if using different package manager
+
+- name: Install containerd systemd unit for binary deployment
+  copy:
+    dest: /etc/systemd/system/containerd.service
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=containerd container runtime
+      Documentation=https://containerd.io
+      After=network.target local-fs.target
+
+      [Service]
+      ExecStart=/usr/local/bin/containerd
+      Type=notify
+      Delegate=yes
+      KillMode=process
+      Restart=always
+      RestartSec=5
+      LimitNPROC=infinity
+      LimitCORE=infinity
+      LimitNOFILE=infinity
+      TasksMax=infinity
+      OOMScoreAdjust=-999
+
+      [Install]
+      WantedBy=multi-user.target
+  when:
+    - airgap.enabled | bool
+    - containerd_binary_archive.matched | default(0) | int > 0
+
+- name: Reload systemd after installing containerd unit
+  systemd:
+    daemon_reload: yes
+  when:
+    - airgap.enabled | bool
+    - containerd_binary_archive.matched | default(0) | int > 0
+
+- name: Ensure containerd config directory exists
+  file:
+    path: /etc/containerd
+    state: directory
+
+- name: Ensure containerd root directory exists
+  file:
+    path: "{{ containerd_config.root_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Generate default containerd config
+  command: containerd config default
+  register: containerd_config_default
+  changed_when: false
+
+- name: Write default containerd config
+  copy:
+    dest: /etc/containerd/config.toml
+    content: "{{ containerd_config_default.stdout }}"
+
+- name: Configure containerd to use SystemdCgroup
+  replace:
+    path: /etc/containerd/config.toml
+    regexp: 'SystemdCgroup = false'
+    replace: 'SystemdCgroup = true'
+  notify: restart containerd
+
+- name: Configure containerd root directory
+  replace:
+    path: /etc/containerd/config.toml
+    regexp: '^root = .*$'
+    replace: 'root = "{{ containerd_config.root_dir }}"'
+  notify: restart containerd
+
+- name: Enable and start containerd
+  systemd:
+    name: containerd
+    state: started
+    enabled: yes
+
+- name: Copy offline images directory to target
+  copy:
+    src: "{{ airgap.artifacts_dir }}/images/"
+    dest: "{{ airgap.offline_images_dir }}/"
+  when: airgap.enabled | bool
+
+- name: Copy image load script
+  copy:
+    src: "{{ playbook_dir }}/scripts/load-images.sh"
+    dest: "/tmp/load-images.sh"
+    mode: '0755'
+  when: airgap.enabled | bool
+
+- name: Load offline container images into containerd
+  command: "/tmp/load-images.sh {{ airgap.offline_images_dir }}"
+  when: airgap.enabled | bool
+  register: image_load
+  changed_when: "'Finished loading images' in image_load.stdout"

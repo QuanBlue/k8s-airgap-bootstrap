@@ -1,0 +1,42 @@
+---
+- name: Install keepalived from offline packages
+  shell: yum localinstall -y /tmp/k8s-packages/keepalived*.rpm /tmp/k8s-packages/socat*.rpm /tmp/k8s-packages/conntrack-tools*.rpm
+  when:
+    - airgap.enabled | bool
+    - ansible_os_family == "RedHat"
+  ignore_errors: yes
+
+- name: Install keepalived DEB packages offline on Debian/Ubuntu
+  shell: DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/k8s-packages/keepalived*.deb /tmp/k8s-packages/socat*.deb /tmp/k8s-packages/conntrack*.deb /tmp/k8s-packages/ipset*.deb /tmp/k8s-packages/ipvsadm*.deb
+  when:
+    - airgap.enabled | bool
+    - ansible_os_family == "Debian"
+  ignore_errors: yes
+
+- name: Create keepalived health check script
+  copy:
+    dest: /etc/keepalived/check_apiserver.sh
+    content: |
+      #!/bin/sh
+      errorExit() {
+          echo "*** $*" 1>&2
+          exit 1
+      }
+      curl --silent --max-time 2 --insecure https://localhost:{{ k8s_ha.vip_port }}/ -o /dev/null || errorExit "Error GET https://localhost:{{ k8s_ha.vip_port }}/"
+      if ip addr | grep -q {{ k8s_ha.vip_address }}; then
+          curl --silent --max-time 2 --insecure https://{{ k8s_ha.vip_address }}:{{ k8s_ha.vip_port }}/ -o /dev/null || errorExit "Error GET https://{{ k8s_ha.vip_address }}:{{ k8s_ha.vip_port }}/"
+      fi
+    mode: '0755'
+
+- name: Configure Keepalived
+  template:
+    src: keepalived.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+    mode: '0644'
+  notify: restart keepalived
+
+- name: Enable and start Keepalived
+  systemd:
+    name: keepalived
+    state: started
+    enabled: yes

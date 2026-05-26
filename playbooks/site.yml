@@ -1,0 +1,6 @@
+---
+# Master Playbook for Airgap Kubernetes
+
+- import_playbook: prepare.yml
+- import_playbook: ha.yml
+- import_playbook: kubernetes.yml

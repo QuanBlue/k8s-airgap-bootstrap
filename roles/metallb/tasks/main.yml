@@ -1,0 +1,5 @@
+---
+# Placeholder for metallb role
+- name: MetalLB placeholder
+  debug:
+    msg: "metallb role is optional and not implemented by default."

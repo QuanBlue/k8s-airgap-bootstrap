@@ -1,0 +1,28 @@
+---
+- name: Load join commands
+  include_vars:
+    file: /tmp/k8s_join_commands.yml
+    name: join_vars
+  delegate_to: localhost
+
+- name: Check if node is already joined
+  stat:
+    path: /etc/kubernetes/admin.conf
+  register: kubeadm_admin_conf
+
+- name: Join master node to cluster
+  command: "{{ join_vars.master_join }}"
+  when: not kubeadm_admin_conf.stat.exists
+
+- name: Setup kubeconfig for root
+  file:
+    path: /root/.kube
+    state: directory
+    mode: '0700'
+
+- name: Copy admin.conf to root's kube config
+  copy:
+    src: /etc/kubernetes/admin.conf
+    dest: /root/.kube/config
+    remote_src: yes
+    mode: '0600'

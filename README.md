@@ -45,7 +45,7 @@ This repository provides an automated, idempotent framework to deploy highly ava
 
 - `./bootstrap.sh`
   - Interactively generates `inventories/inventory.ini` and `group_vars/*.yml`.
-  - Supports project/environment naming, optional hostname cluster number, node IP input, VIP settings, and Kubernetes network settings.
+  - Supports project/environment naming, optional hostname cluster number, node IP input, VIP settings, Kubernetes network settings, and optional custom storage partition paths for containerd and kubelet logs.
 - `./dry-run.sh`
   - Previews the bootstrap result without modifying real files.
   - Shows cluster summary, generated hostnames, server IPs, artifact download plan, file diffs, and Ansible syntax validation.

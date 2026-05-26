@@ -1,0 +1,5 @@
+---
+# Placeholder for ingress-nginx role
+- name: Ingress-nginx placeholder
+  debug:
+    msg: "ingress-nginx role is optional and not implemented by default."

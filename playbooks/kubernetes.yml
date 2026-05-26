@@ -1,0 +1,15 @@
+---
+# Kubernetes Installation and Cluster Bootstrapping
+
+- name: Bootstrap Kubernetes Cluster
+  hosts: all
+  become: true
+  roles:
+    - kubernetes
+
+- name: Deploy Cluster Addons (CNI, etc.)
+  hosts: masters[0]
+  become: true
+  tags: ['addons']
+  roles:
+    - calico

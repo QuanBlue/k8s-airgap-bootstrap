@@ -1,0 +1,15 @@
+---
+- name: Load join commands
+  include_vars:
+    file: /tmp/k8s_join_commands.yml
+    name: join_vars
+  delegate_to: localhost
+
+- name: Check if node is already joined
+  stat:
+    path: /etc/kubernetes/kubelet.conf
+  register: kubelet_conf
+
+- name: Join worker node to cluster
+  command: "{{ join_vars.worker_join }}"
+  when: not kubelet_conf.stat.exists

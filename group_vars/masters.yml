@@ -1,0 +1,3 @@
+---
+# Master node specific variables
+node_role: master

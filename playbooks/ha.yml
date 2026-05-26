@@ -1,0 +1,13 @@
+---
+# High Availability Configuration (HAProxy + Keepalived)
+
+- name: Configure High Availability for Kubernetes API Server
+  hosts: masters
+  become: true
+  # Only run if HA is enabled
+  tags: ['ha']
+  roles:
+    - role: haproxy
+      when: k8s_ha.enabled | default(false) | bool
+    - role: keepalived
+      when: k8s_ha.enabled | default(false) | bool

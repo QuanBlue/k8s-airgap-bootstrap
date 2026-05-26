@@ -1,0 +1,18 @@
+---
+- name: Ensure Kubernetes manifests directory exists
+  file:
+    path: /etc/kubernetes/manifests
+    state: directory
+
+- name: Copy Calico manifest
+  copy:
+    src: "{{ airgap.artifacts_dir }}/manifests/calico.yaml"
+    dest: /etc/kubernetes/calico.yaml
+  when: airgap.enabled | bool
+
+- name: Apply Calico CNI
+  command: kubectl apply -f /etc/kubernetes/calico.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: calico_apply
+  changed_when: "'created' in calico_apply.stdout or 'configured' in calico_apply.stdout"

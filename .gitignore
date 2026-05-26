@@ -1,0 +1,20 @@
+# Airgap artifacts and downloaded installers
+/artifacts/
+
+# Generated inventory
+/inventories/inventory.ini
+/.bootstrap-backups/
+
+# Ansible runtime files
+*.retry
+.ansible/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+*.swo
+
+# OS/editor noise
+.DS_Store
+Thumbs.db

@@ -1,0 +1,8 @@
+---
+- name: Copy helm binary
+  copy:
+    src: "{{ airgap.artifacts_dir }}/bin/helm"
+    dest: /usr/local/bin/helm
+    mode: '0755'
+  when: airgap.enabled | bool
+  ignore_errors: yes # Ignore if binary wasn't downloaded in artifacts

@@ -1,0 +1,9 @@
+---
+# OS Preparation and Container Runtime
+
+- name: Prepare OS and configure basic prerequisites
+  hosts: all
+  become: true
+  roles:
+    - common
+    - containerd

@@ -1,0 +1,9 @@
+---
+# Placeholder for local offline container registry
+# This role would setup a docker registry and push the offline images to it.
+# In our current setup, we load images directly into containerd on each node,
+# so this role is optional.
+
+- name: Registry placeholder
+  debug:
+    msg: "Local registry role is not implemented by default. Using direct containerd image loading instead."

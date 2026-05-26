@@ -1,0 +1,39 @@
+---
+cluster_name: "dms4-cluster"
+project_name: "vietteldms"
+project_short_name: "DMS4"
+environment_name: "Prod"
+app_user: "app_vietteldms"
+kubernetes_version: "1.36.0"
+
+# Networking
+network:
+  pod_cidr: "10.244.0.0/16"
+  service_cidr: "10.96.0.0/12"
+
+# Container Runtime
+container_runtime: containerd
+containerd_config:
+  root_dir: "/var/lib/containerd"
+
+# Kubelet
+kubelet:
+  pod_logs_dir: ""
+  volume_stats_agg_period: "0s"
+  container_log_max_size: "50Mi"
+  container_log_max_files: 90
+  image_gc_high_threshold_percent: 65
+  image_gc_low_threshold_percent: 60
+
+# High Availability Settings
+k8s_ha:
+  enabled: true
+  vip_address: "10.0.6.99"
+  vip_interface: "eth0"
+  vip_port: 6443
+
+# Offline/Airgap specific
+airgap:
+  enabled: true
+  artifacts_dir: "{{ playbook_dir }}/artifacts"
+  offline_images_dir: "/var/lib/k8s-offline-images"

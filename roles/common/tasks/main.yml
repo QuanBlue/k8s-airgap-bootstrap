@@ -1,0 +1,50 @@
+---
+- name: Disable swap immediately
+  command: swapoff -a
+  when: ansible_swaptotal_mb > 0
+
+- name: Disable swap permanently in fstab
+  replace:
+    path: /etc/fstab
+    regexp: '^([^#].*?\sswap\s+sw\s+.*)$'
+    replace: '# \1'
+
+- name: Load required kernel modules
+  modprobe:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - overlay
+    - br_netfilter
+
+- name: Ensure kernel modules are loaded on boot
+  copy:
+    dest: /etc/modules-load.d/k8s.conf
+    content: |
+      overlay
+      br_netfilter
+
+- name: Configure sysctl parameters for Kubernetes
+  sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_set: yes
+    state: present
+    reload: yes
+  loop:
+    - { name: 'net.bridge.bridge-nf-call-iptables', value: '1' }
+    - { name: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
+    - { name: 'net.ipv4.ip_forward', value: '1' }
+
+- name: Set hostname from inventory
+  hostname:
+    name: "{{ inventory_hostname }}"
+
+- name: Configure /etc/hosts with cluster nodes
+  blockinfile:
+    path: /etc/hosts
+    block: |
+      {% for host in groups['k8s_cluster'] %}
+      {{ hostvars[host]['ansible_host'] }} {{ host }}
+      {% endfor %}
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - K8S CLUSTER"
