@@ -4,6 +4,9 @@
 - name: Configure High Availability for Kubernetes API Server
   hosts: masters
   become: true
+  module_defaults:
+    ansible.builtin.gather_facts:
+      gather_timeout: 30
   # Only run if HA is enabled
   tags: ['ha']
   roles:

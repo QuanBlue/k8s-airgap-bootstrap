@@ -1,0 +1,12 @@
+---
+calico_networking_backend: vxlan
+# IP_AUTODETECTION_METHOD options:
+#   interface=eth0          - chỉ định tên interface
+#   cidr=10.0.0.0/8         - chọn interface có IP thuộc dải này
+#   first-found             - mặc định, lấy interface đầu tiên (hay chọn sai)
+calico_ip_autodetection_method: "first-found"
+
+airgap:
+  enabled: true
+  artifacts_dir: "{{ playbook_dir | dirname }}/artifacts"
+  offline_images_dir: "/var/lib/k8s-offline-images"

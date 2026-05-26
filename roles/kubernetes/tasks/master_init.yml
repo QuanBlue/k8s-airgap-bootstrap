@@ -13,17 +13,24 @@
   template:
     src: kubeadm-init.yaml.j2
     dest: /etc/kubernetes/kubeadm/kubeadm-init.yaml
+    force: yes
 
 - name: Initialize Kubernetes cluster
   command: kubeadm init --config /etc/kubernetes/kubeadm/kubeadm-init.yaml --upload-certs
   when: not kubeadm_admin_conf.stat.exists
   register: kubeadm_init_output
 
+- name: Re-check cluster state after init
+  stat:
+    path: /etc/kubernetes/admin.conf
+  register: kubeadm_admin_conf_post
+
 - name: Setup kubeconfig for root
   file:
     path: /root/.kube
     state: directory
     mode: '0700'
+  when: kubeadm_admin_conf_post.stat.exists
 
 - name: Copy admin.conf to root's kube config
   copy:
@@ -31,20 +38,25 @@
     dest: /root/.kube/config
     remote_src: yes
     mode: '0600'
+  when: kubeadm_admin_conf_post.stat.exists
 
 - name: Generate join command for masters
-  command: kubeadm token create --print-join-command --certificate-key $(kubeadm init phase upload-certs --upload-certs | tail -n 1)
+  shell: kubeadm token create --print-join-command --certificate-key $(kubeadm init phase upload-certs --upload-certs | tail -n 1)
   register: master_join_command
-  when: groups['masters'] | length > 1
+  when:
+    - kubeadm_admin_conf_post.stat.exists
+    - groups['masters'] | length > 1
 
 - name: Generate join command for workers
   command: kubeadm token create --print-join-command
   register: worker_join_command
+  when: kubeadm_admin_conf_post.stat.exists
 
 - name: Set join commands as facts
   set_fact:
     k8s_master_join_cmd: "{{ master_join_command.stdout | default('') }}"
     k8s_worker_join_cmd: "{{ worker_join_command.stdout | default('') }}"
+  when: kubeadm_admin_conf_post.stat.exists
 
 - name: Share join commands locally
   delegate_to: localhost
@@ -53,3 +65,4 @@
       master_join: "{{ k8s_master_join_cmd }}"
       worker_join: "{{ k8s_worker_join_cmd }}"
     dest: /tmp/k8s_join_commands.yml
+  when: kubeadm_admin_conf_post.stat.exists

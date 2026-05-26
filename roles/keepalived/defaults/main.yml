@@ -1,0 +1,5 @@
+---
+airgap:
+  enabled: true
+  artifacts_dir: "{{ playbook_dir | dirname }}/artifacts"
+  offline_images_dir: "/var/lib/k8s-offline-images"

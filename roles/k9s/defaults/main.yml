@@ -1,0 +1,6 @@
+---
+app_user: app_k8s
+
+airgap:
+  enabled: true
+  artifacts_dir: "{{ playbook_dir | dirname }}/artifacts"

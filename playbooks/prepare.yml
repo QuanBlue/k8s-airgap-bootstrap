@@ -4,6 +4,9 @@
 - name: Prepare OS and configure basic prerequisites
   hosts: all
   become: true
+  module_defaults:
+    ansible.builtin.gather_facts:
+      gather_timeout: 30
   roles:
     - common
     - containerd

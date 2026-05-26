@@ -10,9 +10,78 @@
     dest: /etc/kubernetes/calico.yaml
   when: airgap.enabled | bool
 
+- name: Wait for Kubernetes API server to be ready
+  command: kubectl get nodes
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: api_ready
+  retries: 20
+  delay: 10
+  until: api_ready.rc == 0
+
+- name: Check if Calico is already installed
+  command: kubectl get daemonset calico-node -n kube-system
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: calico_check
+  failed_when: false
+  changed_when: false
+
 - name: Apply Calico CNI
   command: kubectl apply -f /etc/kubernetes/calico.yaml
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
   register: calico_apply
   changed_when: "'created' in calico_apply.stdout or 'configured' in calico_apply.stdout"
+  when: calico_check.rc != 0
+
+- name: Patch calico-node for VXLAN (env vars + remove BIRD from probes)
+  shell: |
+    kubectl patch daemonset calico-node -n kube-system --type=strategic -p '
+    {
+      "spec": {
+        "template": {
+          "spec": {
+            "containers": [{
+              "name": "calico-node",
+              "env": [
+                {"name": "CALICO_NETWORKING_BACKEND", "value": "vxlan"},
+                {"name": "CALICO_IPV4POOL_VXLAN", "value": "Always"},
+                {"name": "CALICO_IPV4POOL_IPIP", "value": "Never"},
+                {"name": "IP_AUTODETECTION_METHOD", "value": "{{ calico_ip_autodetection_method }}"}
+              ],
+              "livenessProbe": {
+                "exec": {
+                  "command": ["/bin/calico-node", "-felix-live"]
+                }
+              },
+              "readinessProbe": {
+                "exec": {
+                  "command": ["/bin/calico-node", "-felix-ready"]
+                }
+              }
+            }]
+          }
+        }
+      }
+    }'
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  when: calico_networking_backend == 'vxlan'
+
+- name: Patch IPPool to use VXLAN
+  command: >
+    kubectl patch ippool default-ipv4-ippool --type=merge
+    -p '{"spec":{"ipipMode":"Never","vxlanMode":"Always"}}'
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  failed_when: false
+  when: calico_networking_backend == 'vxlan'
+
+- name: Wait for Calico pods to be ready
+  command: kubectl rollout status daemonset/calico-node -n kube-system --timeout=180s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: calico_ready
+  failed_when: false
+  changed_when: false

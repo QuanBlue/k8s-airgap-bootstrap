@@ -1,7 +1,7 @@
 ---
-cluster_name: "dms4-cluster"
-project_name: "vietteldms"
-project_short_name: "DMS4"
+cluster_name: "k8s-cluster"
+project_name: "k8s-cluster"
+project_short_name: "KC"
 environment_name: "Prod"
 app_user: "app_vietteldms"
 kubernetes_version: "1.36.0"
@@ -14,11 +14,11 @@ network:
 # Container Runtime
 container_runtime: containerd
 containerd_config:
-  root_dir: "/var/lib/containerd"
+  root_dir: "/u01/app/lib/containerd"
 
 # Kubelet
 kubelet:
-  pod_logs_dir: ""
+  pod_logs_dir: "/u01/app/log/containerd"
   volume_stats_agg_period: "0s"
   container_log_max_size: "50Mi"
   container_log_max_files: 90
@@ -28,12 +28,16 @@ kubelet:
 # High Availability Settings
 k8s_ha:
   enabled: true
-  vip_address: "10.0.6.99"
+  vip_address: "10.10.10.100"
   vip_interface: "eth0"
   vip_port: 6443
+
+# Calico CNI
+calico_networking_backend: vxlan
+calico_ip_autodetection_method: "first-found"
 
 # Offline/Airgap specific
 airgap:
   enabled: true
-  artifacts_dir: "{{ playbook_dir }}/artifacts"
-  offline_images_dir: "/var/lib/k8s-offline-images"
+  artifacts_dir: "{{ playbook_dir | dirname }}/artifacts"
+  offline_images_dir: "/u01/app/lib/k8s-offline-images"

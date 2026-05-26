@@ -1,3 +1,2 @@
 ---
-# Worker node specific variables
 node_role: worker

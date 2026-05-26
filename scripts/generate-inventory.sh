@@ -12,6 +12,8 @@ while [[ "$#" -gt 0 ]]; do
         --worker-ips) WORKER_IPS="$2"; shift ;;
         --project-name) PROJECT_NAME="$2"; shift ;;
         --project-short-name) PROJECT_SHORT_NAME="$2"; shift ;;
+        --ansible-user) ANSIBLE_USER="$2"; shift ;;
+        --ansible-ssh-private-key-file) ANSIBLE_SSH_PRIVATE_KEY_FILE="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; exit 1 ;;
     esac
     shift
@@ -55,6 +57,7 @@ build_project_prefix() {
 }
 
 PROJECT_SHORT_NAME=${PROJECT_SHORT_NAME:-$(build_project_prefix "$PROJECT_NAME")}
+ANSIBLE_USER=${ANSIBLE_USER:-root}
 IFS=',' read -r -a MASTER_IP_ARRAY <<< "${MASTER_IPS:-}"
 IFS=',' read -r -a WORKER_IP_ARRAY <<< "${WORKER_IPS:-}"
 
@@ -97,11 +100,14 @@ masters
 workers
 
 [all:vars]
-ansible_user=root # REPLACE WITH YOUR SSH USER
-ansible_ssh_private_key_file=~/.ssh/id_rsa # REPLACE WITH YOUR KEY
+ansible_user=${ANSIBLE_USER}
 project_name=${PROJECT_NAME}
 project_short_name=${PROJECT_SHORT_NAME}
 environment_name=${ENVIRONMENT_NAME}
 EOF
+
+if [[ -n "${ANSIBLE_SSH_PRIVATE_KEY_FILE:-}" ]]; then
+    echo "ansible_ssh_private_key_file=${ANSIBLE_SSH_PRIVATE_KEY_FILE}" >> "$INVENTORY_FILE"
+fi
 
 echo "Inventory generated at $INVENTORY_FILE"

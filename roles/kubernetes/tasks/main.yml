@@ -1,63 +1,45 @@
 ---
-- name: Ensure offline binaries directory exists
-  file:
-    path: /tmp/k8s-bin
-    state: directory
+- name: Resolve kubeadm binary on control node
+  set_fact:
+    kubeadm_binary_src: "{{ lookup('ansible.builtin.fileglob', airgap.artifacts_dir ~ '/bin/kubeadm', wantlist=True) | first | default('') }}"
   when: airgap.enabled | bool
 
-- name: Copy Kubernetes installer binaries bundle
-  copy:
-    src: "{{ airgap.artifacts_dir }}/bin/"
-    dest: /tmp/k8s-bin/
+- name: Resolve kubelet binary on control node
+  set_fact:
+    kubelet_binary_src: "{{ lookup('ansible.builtin.fileglob', airgap.artifacts_dir ~ '/bin/kubelet', wantlist=True) | first | default('') }}"
   when: airgap.enabled | bool
 
-- name: Check for kubeadm binary
-  stat:
-    path: /tmp/k8s-bin/kubeadm
-  register: kubeadm_binary
-  when: airgap.enabled | bool
-
-- name: Check for kubelet binary
-  stat:
-    path: /tmp/k8s-bin/kubelet
-  register: kubelet_binary
-  when: airgap.enabled | bool
-
-- name: Check for kubectl binary
-  stat:
-    path: /tmp/k8s-bin/kubectl
-  register: kubectl_binary
+- name: Resolve kubectl binary on control node
+  set_fact:
+    kubectl_binary_src: "{{ lookup('ansible.builtin.fileglob', airgap.artifacts_dir ~ '/bin/kubectl', wantlist=True) | first | default('') }}"
   when: airgap.enabled | bool
 
 - name: Install kubeadm from local binary bundle
   copy:
-    src: /tmp/k8s-bin/kubeadm
+    src: "{{ kubeadm_binary_src }}"
     dest: /usr/local/bin/kubeadm
-    remote_src: true
     mode: '0755'
   when:
     - airgap.enabled | bool
-    - kubeadm_binary.stat.exists | default(false)
+    - kubeadm_binary_src | length > 0
 
 - name: Install kubelet from local binary bundle
   copy:
-    src: /tmp/k8s-bin/kubelet
+    src: "{{ kubelet_binary_src }}"
     dest: /usr/local/bin/kubelet
-    remote_src: true
     mode: '0755'
   when:
     - airgap.enabled | bool
-    - kubelet_binary.stat.exists | default(false)
+    - kubelet_binary_src | length > 0
 
 - name: Install kubectl from local binary bundle
   copy:
-    src: /tmp/k8s-bin/kubectl
+    src: "{{ kubectl_binary_src }}"
     dest: /usr/local/bin/kubectl
-    remote_src: true
     mode: '0755'
   when:
     - airgap.enabled | bool
-    - kubectl_binary.stat.exists | default(false)
+    - kubectl_binary_src | length > 0
 
 - name: Install Kubernetes components from offline packages
   shell: yum localinstall -y /tmp/k8s-packages/kubeadm*.rpm /tmp/k8s-packages/kubelet*.rpm /tmp/k8s-packages/kubectl*.rpm /tmp/k8s-packages/kubernetes-cni*.rpm
@@ -90,9 +72,9 @@
   when: inventory_hostname == groups['masters'][0]
 
 - include_tasks: master_join.yml
-  when: 
-    - node_role == 'master'
+  when:
+    - inventory_hostname in groups['masters']
     - inventory_hostname != groups['masters'][0]
 
 - include_tasks: worker_join.yml
-  when: node_role == 'worker'
+  when: inventory_hostname in groups['workers']

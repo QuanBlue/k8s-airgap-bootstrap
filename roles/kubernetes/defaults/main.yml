@@ -1,0 +1,26 @@
+---
+kubernetes_version: "1.36.0"
+cluster_name: "kubernetes"
+
+network:
+  pod_cidr: "10.244.0.0/16"
+  service_cidr: "10.96.0.0/12"
+
+k8s_ha:
+  enabled: false
+  vip_address: ""
+  vip_interface: "eth0"
+  vip_port: 6443
+
+airgap:
+  enabled: true
+  artifacts_dir: "{{ playbook_dir | dirname }}/artifacts"
+  offline_images_dir: "/var/lib/k8s-offline-images"
+
+kubelet:
+  pod_logs_dir: ""
+  volume_stats_agg_period: "0s"
+  container_log_max_size: "50Mi"
+  container_log_max_files: 90
+  image_gc_high_threshold_percent: 65
+  image_gc_low_threshold_percent: 60

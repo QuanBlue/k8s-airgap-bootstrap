@@ -1,12 +1,21 @@
 ---
+- name: Verify airgap artifacts directory exists on control node
+  stat:
+    path: "{{ airgap.artifacts_dir }}"
+  register: airgap_artifacts_dir_stat
+  delegate_to: localhost
+  become: false
+
+- name: Fail when airgap artifacts directory is missing on control node
+  fail:
+    msg: >-
+      Airgap artifacts directory {{ airgap.artifacts_dir }} was not found on the control node.
+      Run ./scripts/download-artifacts.sh and verify you are executing ansible-playbook from the repository root.
+  when: not airgap_artifacts_dir_stat.stat.exists
+
 - name: Ensure offline packages directory exists
   file:
     path: /tmp/k8s-packages
-    state: directory
-
-- name: Ensure offline binaries directory exists
-  file:
-    path: /tmp/k8s-bin
     state: directory
 
 - name: Copy containerd offline packages (RPMs)
@@ -15,61 +24,62 @@
     dest: /tmp/k8s-packages/
   when: airgap.enabled | bool
 
-- name: Copy installer binaries bundle
-  copy:
-    src: "{{ airgap.artifacts_dir }}/bin/"
-    dest: /tmp/k8s-bin/
+- name: Resolve containerd archive on control node
+  set_fact:
+    containerd_archive_src: "{{ lookup('ansible.builtin.fileglob', airgap.artifacts_dir ~ '/bin/containerd-*-linux-amd64.tar.gz', wantlist=True) | first | default('') }}"
   when: airgap.enabled | bool
 
-- name: Find containerd binary archive
-  find:
-    paths: /tmp/k8s-bin
-    patterns: "containerd-*-linux-amd64.tar.gz"
-    file_type: file
-  register: containerd_binary_archive
+- name: Fail when containerd airgap archive is missing
+  fail:
+    msg: >-
+      Containerd archive was not found on the control node for {{ inventory_hostname }}.
+      Expected a file like containerd-*-linux-amd64.tar.gz from {{ airgap.artifacts_dir }}/bin.
+      Re-run ./scripts/download-artifacts.sh on the control node and verify the artifacts directory is mounted at {{ airgap.artifacts_dir }}.
+  when:
+    - airgap.enabled | bool
+    - containerd_archive_src | length == 0
+    - ansible_os_family != "RedHat"
+
+- name: Resolve crictl archive on control node
+  set_fact:
+    crictl_archive_src: "{{ lookup('ansible.builtin.fileglob', airgap.artifacts_dir ~ '/bin/crictl-*-linux-amd64.tar.gz', wantlist=True) | first | default('') }}"
   when: airgap.enabled | bool
 
-- name: Find crictl binary archive
-  find:
-    paths: /tmp/k8s-bin
-    patterns: "crictl-*-linux-amd64.tar.gz"
-    file_type: file
-  register: crictl_binary_archive
-  when: airgap.enabled | bool
-
-- name: Check for runc binary
-  stat:
-    path: /tmp/k8s-bin/runc.amd64
-  register: runc_binary
+- name: Resolve runc binary on control node
+  set_fact:
+    runc_binary_src: "{{ lookup('ansible.builtin.fileglob', airgap.artifacts_dir ~ '/bin/runc.amd64', wantlist=True) | first | default('') }}"
   when: airgap.enabled | bool
 
 - name: Install containerd from binary archive
   unarchive:
-    src: "{{ containerd_binary_archive.files[0].path }}"
+    src: "{{ containerd_archive_src }}"
     dest: /usr/local
-    remote_src: true
   when:
     - airgap.enabled | bool
-    - containerd_binary_archive.matched | default(0) | int > 0
+    - containerd_archive_src | length > 0
+
+- name: Ensure /usr/local/bin exists after containerd extraction
+  file:
+    path: /usr/local/bin
+    state: directory
+    mode: '0755'
 
 - name: Install runc binary
   copy:
-    src: /tmp/k8s-bin/runc.amd64
+    src: "{{ runc_binary_src }}"
     dest: /usr/local/sbin/runc
-    remote_src: true
     mode: '0755'
   when:
     - airgap.enabled | bool
-    - runc_binary.stat.exists | default(false)
+    - runc_binary_src | length > 0
 
 - name: Install crictl from binary archive
   unarchive:
-    src: "{{ crictl_binary_archive.files[0].path }}"
+    src: "{{ crictl_archive_src }}"
     dest: /usr/local/bin
-    remote_src: true
   when:
     - airgap.enabled | bool
-    - crictl_binary_archive.matched | default(0) | int > 0
+    - crictl_archive_src | length > 0
 
 - name: Install containerd from offline packages when binary archive is unavailable
   shell: |
@@ -80,7 +90,7 @@
   when:
     - airgap.enabled | bool
     - ansible_os_family == "RedHat"
-    - containerd_binary_archive.matched | default(0) | int == 0
+    - containerd_archive_src | length == 0
   ignore_errors: yes # Ignore if already installed or if using different package manager
 
 - name: Install containerd systemd unit for binary deployment
@@ -110,14 +120,14 @@
       WantedBy=multi-user.target
   when:
     - airgap.enabled | bool
-    - containerd_binary_archive.matched | default(0) | int > 0
+    - containerd_archive_src | length > 0
 
 - name: Reload systemd after installing containerd unit
   systemd:
     daemon_reload: yes
   when:
     - airgap.enabled | bool
-    - containerd_binary_archive.matched | default(0) | int > 0
+    - containerd_archive_src | length > 0
 
 - name: Ensure containerd config directory exists
   file:
@@ -130,8 +140,21 @@
     state: directory
     mode: '0755'
 
+- name: Check for installed containerd binary
+  stat:
+    path: /usr/local/bin/containerd
+  register: local_containerd_binary
+
+- name: Fail when containerd binary is still unavailable after installation
+  fail:
+    msg: >-
+      /usr/local/bin/containerd is still missing on {{ inventory_hostname }} after the installation step.
+      Verify that the containerd archive exists in {{ airgap.artifacts_dir }}/bin and that the unarchive task completed successfully.
+  when:
+    - not local_containerd_binary.stat.exists
+
 - name: Generate default containerd config
-  command: containerd config default
+  command: /usr/local/bin/containerd config default
   register: containerd_config_default
   changed_when: false
 
@@ -168,7 +191,7 @@
 
 - name: Copy image load script
   copy:
-    src: "{{ playbook_dir }}/scripts/load-images.sh"
+    src: "{{ playbook_dir | dirname }}/scripts/load-images.sh"
     dest: "/tmp/load-images.sh"
     mode: '0755'
   when: airgap.enabled | bool

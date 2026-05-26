@@ -13,12 +13,11 @@ To successfully install the cluster, the following artifacts must be pre-downloa
 
 ## Step 1: Downloading Artifacts (Internet-Connected Machine)
 
-We provide helper scripts to automate the download process. Run them on a machine that has internet access and the same OS family as your target nodes.
+We provide a helper script to automate the download process. Run it on a machine that has internet access and the same OS family as your target nodes.
 
-For Ubuntu 24.04, the scripts are expected to run on an Ubuntu-based machine with access to the Kubernetes `pkgs.k8s.io` APT repository for your target Kubernetes minor version. The installer script uses an isolated APT source set for Ubuntu + Kubernetes packages, so unrelated broken PPAs on the host do not block artifact preparation.
+For Ubuntu 24.04, the script is expected to run on an Ubuntu-based machine with internet access. It uses an isolated APT source set for Ubuntu packages and automatically adds the Kubernetes `pkgs.k8s.io` repository for the target Kubernetes minor version, so unrelated broken PPAs on the host do not block artifact preparation.
 
 ```bash
-./scripts/download-installers.sh
 ./scripts/download-artifacts.sh
 ```
 
@@ -28,7 +27,7 @@ For Ubuntu 24.04, the scripts are expected to run on an Ubuntu-based machine wit
 - Creates an `artifacts/` directory.
 - Uses the host package manager to download required system packages.
 - On Ubuntu 24.04, downloads offline `.deb` packages using `apt-get`.
-- Uses `docker pull` or `ctr` to download required container images.
+- Uses `docker pull --platform linux/amd64` to download required container images for the target cluster architecture.
 - Uses `docker save` or `ctr image export` to package images into `.tar` files.
 - Downloads required binaries and manifests via `curl` or `wget`.
 

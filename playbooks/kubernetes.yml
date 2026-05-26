@@ -4,12 +4,19 @@
 - name: Bootstrap Kubernetes Cluster
   hosts: all
   become: true
+  module_defaults:
+    ansible.builtin.gather_facts:
+      gather_timeout: 30
   roles:
     - kubernetes
+    - k9s
 
 - name: Deploy Cluster Addons (CNI, etc.)
   hosts: masters[0]
   become: true
+  module_defaults:
+    ansible.builtin.gather_facts:
+      gather_timeout: 30
   tags: ['addons']
   roles:
     - calico

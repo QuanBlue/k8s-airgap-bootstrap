@@ -12,12 +12,14 @@ This repository provides an automated, idempotent framework to deploy highly ava
 - **Dynamic Topology**: Easily configurable node counts with standardized hostname templates.
 - **High Availability**: Optional VIP-based API Server HA using HAProxy and Keepalived.
 - **Modern Stack**: `containerd` as the container runtime, Calico CNI.
+- **Cluster Operations UX**: `k9s` is installed on master nodes for both `root` and `app_user`.
 - **Production-Ready**: Built following enterprise best practices for Ansible and Kubernetes.
 
 ## Prerequisites
 
 - Base OS: RHEL/AlmaLinux/Rocky or Ubuntu (Debian) family.
 - Ubuntu 24.04 is supported; offline package preparation uses `.deb` packages and APT-based installation.
+- On Ubuntu 24.04, the artifact download script can prepare Kubernetes `.deb` packages without requiring you to preconfigure the Kubernetes APT repo on the host.
 - Ansible installed on the control node.
 - SSH key-based authentication to all target nodes.
 - Offline artifacts downloaded (see [Airgap Preparation Guide](docs/airgap-guide.md)).
@@ -30,7 +32,6 @@ This repository provides an automated, idempotent framework to deploy highly ava
    ```
 2. Download offline artifacts on an internet-connected machine:
    ```bash
-   ./scripts/download-installers.sh
    ./scripts/download-artifacts.sh
    ```
 3. Transfer the repository and artifacts to the air-gapped control node.
@@ -55,12 +56,12 @@ This repository provides an automated, idempotent framework to deploy highly ava
 
 ### Artifact preparation
 
-- `./scripts/download-installers.sh`
-  - Downloads offline installer binaries and package files into `artifacts/`.
-  - Includes `containerd`, `runc`, `crictl`, `helm`, `kubeadm`, `kubelet`, `kubectl`, and offline RPM dependencies when available.
 - `./scripts/download-artifacts.sh`
   - Downloads the full air-gap bundle.
-  - Reuses `download-installers.sh`, downloads Calico manifest files, and saves Kubernetes and Calico container images into `artifacts/images/`.
+  - Downloads installer binaries, offline OS packages, Calico manifests, and Kubernetes/Calico container images into `artifacts/`.
+  - Includes `k9s` in the binary bundle so master nodes can inspect the cluster locally with `root` and `app_user`.
+  - Container images are pulled for `linux/amd64` to match the target cluster nodes and avoid multi-arch import issues in `containerd`.
+  - This is the only artifact preparation command you need to run on the internet-connected machine.
 - `./scripts/load-images.sh`
   - Loads offline image tar files into `containerd`.
   - This script is copied and executed by Ansible on target nodes during deployment.
@@ -75,9 +76,8 @@ This repository provides an automated, idempotent framework to deploy highly ava
 
 1. `./dry-run.sh`
 2. `./bootstrap.sh`
-3. `./scripts/download-installers.sh`
-4. `./scripts/download-artifacts.sh`
-5. `ansible-playbook playbooks/site.yml`
+3. `./scripts/download-artifacts.sh`
+4. `ansible-playbook playbooks/site.yml`
 
 If you want to undo the latest bootstrap-generated config:
 

@@ -258,8 +258,9 @@ print_download_plan() {
     local runc_version="1.4.0"
     local crictl_version="v1.36.0"
     local helm_version="3.20.1"
+    local k9s_version="v0.50.18"
 
-    kv "scripts" "./scripts/download-installers.sh, ./scripts/download-artifacts.sh"
+    kv "script" "./scripts/download-artifacts.sh"
     kv "bin_dir" "$artifacts_dir/bin"
     kv "packages_dir" "$artifacts_dir/packages"
     kv "images_dir" "$artifacts_dir/images"
@@ -270,6 +271,7 @@ print_download_plan() {
     bullet "runc.amd64"
     bullet "crictl-${crictl_version}-linux-amd64.tar.gz"
     bullet "helm (v${helm_version})"
+    bullet "k9s (${k9s_version})"
     bullet "kubeadm"
     bullet "kubelet"
     bullet "kubectl"
@@ -339,6 +341,10 @@ collect_node_ips "Master" "Master" "$MASTER_COUNT" MASTER_IPS
 collect_node_ips "Worker" "Worker" "$WORKER_COUNT" WORKER_IPS
 IFS=',' read -r -a MASTER_IP_ARRAY <<< "$MASTER_IPS"
 IFS=',' read -r -a WORKER_IP_ARRAY <<< "$WORKER_IPS"
+
+echo
+prompt_value_with_hint ANSIBLE_USER "SSH user" "root" "Tai khoan SSH de Ansible dang nhap vao tat ca node."
+prompt_value_with_hint ANSIBLE_SSH_PRIVATE_KEY_FILE "SSH private key file (optional)" "" "De trong neu may hien tai da SSH duoc bang agent hoac ~/.ssh/config."
 
 VIP_ENABLED="false"
 VIP_ADDRESS=""
@@ -410,6 +416,8 @@ BOOTSTRAP_INPUT="$TMP_DIR/bootstrap-input.txt"
     for ip in "${WORKER_IP_ARRAY[@]}"; do
         printf '%s\n' "$ip"
     done
+    printf '%s\n' "$ANSIBLE_USER"
+    printf '%s\n' "$ANSIBLE_SSH_PRIVATE_KEY_FILE"
 
     if (( MASTER_COUNT > 1 )); then
         if [[ "$VIP_ENABLED" == "true" ]]; then
@@ -443,6 +451,12 @@ kv "project_name" "$PROJECT_NAME"
 kv "project_short_name" "$PROJECT_SHORT_NAME"
 kv "environment_name" "$ENVIRONMENT_NAME"
 kv "app_user" "$APP_USER"
+kv "ssh_user" "$ANSIBLE_USER"
+if [[ -n "$ANSIBLE_SSH_PRIVATE_KEY_FILE" ]]; then
+    kv "ssh_key_file" "$ANSIBLE_SSH_PRIVATE_KEY_FILE"
+else
+    kv "ssh_key_file" "SSH default or agent"
+fi
 kv "kubernetes_version" "$K8S_VERSION"
 kv "vip_enabled" "$VIP_ENABLED"
 if [[ "$VIP_ENABLED" == "true" ]]; then

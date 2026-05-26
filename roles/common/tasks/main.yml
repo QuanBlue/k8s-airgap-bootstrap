@@ -48,3 +48,17 @@
       {{ hostvars[host]['ansible_host'] }} {{ host }}
       {% endfor %}
     marker: "# {mark} ANSIBLE MANAGED BLOCK - K8S CLUSTER"
+
+- name: Ensure application user exists
+  user:
+    name: "{{ app_user }}"
+    shell: /bin/bash
+    create_home: yes
+    state: present
+
+- name: Remove legacy app_k8s user if present and not in use
+  user:
+    name: app_k8s
+    state: absent
+    remove: yes
+  when: app_user != 'app_k8s'

@@ -24,10 +24,9 @@ Generated hostnames follow `<ProjectShortName>-<Env>-<Role>-<Num>`, such as `DMS
 
 ## 2. Prepare Offline Artifacts
 
-On a machine with internet access, run the installer and artifact download scripts:
+On a machine with internet access, run the artifact download script:
 
 ```bash
-./scripts/download-installers.sh
 ./scripts/download-artifacts.sh
 ```
 
