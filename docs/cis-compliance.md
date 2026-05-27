@@ -19,6 +19,8 @@ Status:
 | 1.2.5 | `--kubelet-https=true` | ✅ | kubeadm default |
 | 1.2.6 | `--kubelet-client-certificate / --kubelet-client-key` | ✅ | kubeadm default — `/etc/kubernetes/pki/apiserver-kubelet-client.*` |
 | 1.2.7 | `--kubelet-certificate-authority` | ✅ | kubeadm default (cluster CA) |
+| 1.2.14 | `--tls-min-version=VersionTLS12` | ✅ | Set via `apiServer.extraArgs` in kubeadm-init |
+| 1.2.15 | `--tls-cipher-suites` restricted to strong ciphers | ✅ | Strong cipher list set via `apiServer.extraArgs` (excludes 3DES/RC4/SHA1-MAC) |
 | 1.2.18 | `--audit-log-path` | ✅ | `kubernetes_audit.log_dir` in group_vars (default `/u01/app/log/kubernetes/audit/audit.log`) |
 | 1.2.19 | `--audit-log-maxage` | ✅ | `kubernetes_audit.max_age: 90` (days) |
 | 1.2.20 | `--audit-log-maxbackup` | ✅ | `kubernetes_audit.max_backup: 20` |
@@ -194,6 +196,14 @@ ansible masters[0] -b -a "tail -5 /u01/app/log/kubernetes/audit/audit.log"
 # Anonymous requests are rejected
 ansible masters -b -o -a "curl -sk -o /dev/null -w '%{http_code}' https://localhost:6443/api/v1/namespaces"
 # Expect: 401
+
+# CIS 1.2.14 — TLS 1.0 / 1.1 rejected
+ansible masters -b -o -a "openssl s_client -connect localhost:6443 -tls1_1 </dev/null"
+# Expect: handshake failure
+
+# CIS 1.2.15 — only strong ciphers offered
+ansible masters -b -o -a "openssl s_client -connect localhost:6443 -tls1_2 -cipher 'RC4-SHA' </dev/null"
+# Expect: handshake failure (RC4 not in cipher list)
 ```
 
 ---
