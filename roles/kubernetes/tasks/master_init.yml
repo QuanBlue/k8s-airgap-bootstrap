@@ -15,6 +15,12 @@
     dest: /etc/kubernetes/kubeadm/kubeadm-init.yaml
     force: yes
 
+- name: Reset any partial cluster state before init
+  command: kubeadm reset --force
+  when: not kubeadm_admin_conf.stat.exists
+  ignore_errors: true
+  changed_when: false
+
 - name: Initialize Kubernetes cluster
   command: kubeadm init --config /etc/kubernetes/kubeadm/kubeadm-init.yaml --upload-certs
   when: not kubeadm_admin_conf.stat.exists

@@ -49,40 +49,27 @@
       {% endfor %}
     marker: "# {mark} ANSIBLE MANAGED BLOCK - K8S CLUSTER"
 
-- name: Check if default 'app' user exists
-  getent:
-    database: passwd
-    key: app
-  register: app_user_default
-  failed_when: false
-
-- name: Check if target app_user already exists
-  getent:
-    database: passwd
-    key: "{{ app_user }}"
-  register: app_user_target
-  failed_when: false
-
-- name: Rename 'app' user to configured app_user
-  command: usermod -l {{ app_user }} app
-  when:
-    - app_user != 'app'
-    - app_user_default.rc == 0
-    - app_user_target.rc != 0
-
-- name: Rename primary group 'app' to configured app_user
-  command: groupmod -n {{ app_user }} app
-  when:
-    - app_user != 'app'
-    - app_user_default.rc == 0
-    - app_user_target.rc != 0
-
-- name: Move home directory to match new username
-  command: usermod -d /home/{{ app_user }} -m {{ app_user }}
-  when:
-    - app_user != 'app'
-    - app_user_default.rc == 0
-    - app_user_target.rc != 0
+- name: Rename 'app' user to configured app_user (if needed)
+  shell: |
+    set -e
+    if [ "{{ app_user }}" = "app" ]; then
+      echo "SKIP: app_user is already 'app'"
+      exit 0
+    fi
+    if ! getent passwd app > /dev/null 2>&1; then
+      echo "SKIP: user 'app' does not exist"
+      exit 0
+    fi
+    if getent passwd {{ app_user }} > /dev/null 2>&1; then
+      echo "SKIP: target user '{{ app_user }}' already exists"
+      exit 0
+    fi
+    usermod -l {{ app_user }} app
+    groupmod -n {{ app_user }} app
+    usermod -d /home/{{ app_user }} -m {{ app_user }}
+    echo "RENAMED: app -> {{ app_user }}"
+  register: rename_result
+  changed_when: "'RENAMED:' in rename_result.stdout"
 
 - name: Ensure application user exists
   user:

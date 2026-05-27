@@ -6,12 +6,6 @@ network:
   pod_cidr: "10.244.0.0/16"
   service_cidr: "10.96.0.0/12"
 
-k8s_ha:
-  enabled: false
-  vip_address: ""
-  vip_interface: "eth0"
-  vip_port: 6443
-
 airgap:
   enabled: true
   artifacts_dir: "{{ playbook_dir | dirname }}/artifacts"

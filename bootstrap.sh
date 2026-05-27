@@ -290,9 +290,9 @@ mkdir -p "$BACKUP_DIR"
 : > "$BACKUP_DIR/manifest.txt"
 
 backup_file "inventories/inventory.ini" "$BACKUP_DIR"
-backup_file "group_vars/all.yml"        "$BACKUP_DIR"
-backup_file "group_vars/masters.yml"    "$BACKUP_DIR"
-backup_file "group_vars/workers.yml"    "$BACKUP_DIR"
+backup_file "inventories/group_vars/all.yml"        "$BACKUP_DIR"
+backup_file "inventories/group_vars/masters.yml"    "$BACKUP_DIR"
+backup_file "inventories/group_vars/workers.yml"    "$BACKUP_DIR"
 
 bash ./scripts/generate-inventory.sh \
     --environment-name             "$ENVIRONMENT_NAME" \
@@ -306,7 +306,7 @@ bash ./scripts/generate-inventory.sh \
     --ansible-user                 "$ANSIBLE_USER" \
     --ansible-ssh-private-key-file "$ANSIBLE_SSH_PRIVATE_KEY_FILE"
 
-cat <<EOF > group_vars/all.yml
+cat <<EOF > inventories/group_vars/all.yml
 ---
 cluster_name: "$CLUSTER_NAME"
 project_name: "$PROJECT_NAME"
@@ -352,12 +352,12 @@ airgap:
   offline_images_dir: "$OFFLINE_IMAGES_DIR"
 EOF
 
-cat <<EOF > group_vars/masters.yml
+cat <<EOF > inventories/group_vars/masters.yml
 ---
 node_role: master
 EOF
 
-cat <<EOF > group_vars/workers.yml
+cat <<EOF > inventories/group_vars/workers.yml
 ---
 node_role: worker
 EOF
@@ -367,7 +367,7 @@ echo
 echo -e "${BOLD}${BLUE}$(printf '━%.0s' $(seq 1 68))${NC}"
 echo
 echo -e "  ${GREEN}✔${NC}  inventories/inventory.ini"
-echo -e "  ${GREEN}✔${NC}  group_vars/all.yml"
+echo -e "  ${GREEN}✔${NC}  inventories/group_vars/all.yml"
 echo -e "  ${DIM}  Backup → ${BACKUP_DIR}${NC}"
 echo
 echo -e "  ${BOLD}➜  Chạy tiếp:${NC}  ansible-playbook playbooks/site.yml"
