@@ -49,6 +49,31 @@
       {% endfor %}
     marker: "# {mark} ANSIBLE MANAGED BLOCK - K8S CLUSTER"
 
+- name: Check if default 'app' user exists
+  getent:
+    database: passwd
+    key: app
+  register: app_user_default
+  failed_when: false
+
+- name: Rename 'app' user to configured app_user
+  command: usermod -l {{ app_user }} app
+  when:
+    - app_user != 'app'
+    - app_user_default.ansible_facts is defined
+
+- name: Rename primary group 'app' to configured app_user
+  command: groupmod -n {{ app_user }} app
+  when:
+    - app_user != 'app'
+    - app_user_default.ansible_facts is defined
+
+- name: Move home directory to match new username
+  command: usermod -d /home/{{ app_user }} -m {{ app_user }}
+  when:
+    - app_user != 'app'
+    - app_user_default.ansible_facts is defined
+
 - name: Ensure application user exists
   user:
     name: "{{ app_user }}"
@@ -56,9 +81,3 @@
     create_home: yes
     state: present
 
-- name: Remove legacy app_k8s user if present and not in use
-  user:
-    name: app_k8s
-    state: absent
-    remove: yes
-  when: app_user != 'app_k8s'

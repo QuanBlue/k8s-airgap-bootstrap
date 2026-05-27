@@ -66,3 +66,7 @@
       worker_join: "{{ k8s_worker_join_cmd }}"
     dest: /tmp/k8s_join_commands.yml
   when: kubeadm_admin_conf_post.stat.exists
+
+- name: Label first master node with control-plane and master roles
+  command: kubectl label node {{ inventory_hostname | lower }} node-role.kubernetes.io/control-plane= node-role.kubernetes.io/master= --overwrite
+  when: kubeadm_admin_conf_post.stat.exists

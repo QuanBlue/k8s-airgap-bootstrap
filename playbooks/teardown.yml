@@ -1,0 +1,267 @@
+---
+# Teardown playbook — reverses everything installed by site.yml
+# Usage: ansible-playbook playbooks/teardown.yml
+#        ansible-playbook playbooks/teardown.yml -e remove_app_user=true
+
+# ── 1. Reset Kubernetes cluster ───────────────────────────────────────────────
+- name: Reset Kubernetes on all nodes
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Check if kubeadm is present
+      stat:
+        path: /usr/local/bin/kubeadm
+      register: kubeadm_bin
+
+    - name: Run kubeadm reset
+      command: kubeadm reset --force
+      when: kubeadm_bin.stat.exists
+      ignore_errors: true
+
+    - name: Remove CNI network interfaces
+      shell: |
+        ip link delete cni0    2>/dev/null || true
+        ip link delete flannel.1 2>/dev/null || true
+        ip link delete vxlan.calico 2>/dev/null || true
+        ip link delete tunl0   2>/dev/null || true
+      changed_when: false
+
+    - name: Flush iptables rules
+      shell: |
+        iptables -F
+        iptables -X
+        iptables -t nat -F
+        iptables -t nat -X
+        iptables -t mangle -F
+        iptables -t mangle -X
+        ipvsadm --clear 2>/dev/null || true
+      changed_when: false
+      ignore_errors: true
+
+# ── 2. Remove HA (HAProxy + Keepalived) on masters ───────────────────────────
+- name: Remove HA components from master nodes
+  hosts: masters
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Stop and disable HAProxy
+      systemd:
+        name: haproxy
+        state: stopped
+        enabled: false
+      ignore_errors: true
+
+    - name: Stop and disable Keepalived
+      systemd:
+        name: keepalived
+        state: stopped
+        enabled: false
+      ignore_errors: true
+
+    - name: Remove HAProxy
+      package:
+        name: haproxy
+        state: absent
+      ignore_errors: true
+
+    - name: Remove Keepalived and related packages
+      package:
+        name:
+          - keepalived
+          - socat
+          - conntrack-tools
+          - conntrack
+          - ipset
+          - ipvsadm
+        state: absent
+      ignore_errors: true
+
+    - name: Remove HAProxy config
+      file:
+        path: /etc/haproxy
+        state: absent
+
+    - name: Remove Keepalived config
+      file:
+        path: /etc/keepalived
+        state: absent
+
+# ── 3. Remove k9s from masters ────────────────────────────────────────────────
+- name: Remove k9s from master nodes
+  hosts: masters
+  become: true
+  gather_facts: true
+  vars:
+    _app_user: "{{ app_user | default('app') }}"
+  tasks:
+    - name: Remove k9s binary
+      file:
+        path: /usr/local/bin/k9s
+        state: absent
+
+    - name: Remove root k9s config
+      file:
+        path: /root/.config/k9s
+        state: absent
+
+    - name: Remove app user k9s config
+      file:
+        path: "/home/{{ _app_user }}/.config/k9s"
+        state: absent
+
+    - name: Remove app user kubeconfig
+      file:
+        path: "/home/{{ _app_user }}/.kube"
+        state: absent
+
+# ── 4. Remove Kubernetes components from all nodes ───────────────────────────
+- name: Remove Kubernetes components from all nodes
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Stop and disable kubelet
+      systemd:
+        name: kubelet
+        state: stopped
+        enabled: false
+      ignore_errors: true
+
+    - name: Remove Kubernetes RPM packages
+      shell: rpm -e --nodeps kubeadm kubelet kubectl kubernetes-cni 2>/dev/null || true
+      changed_when: false
+
+    - name: Remove Kubernetes DEB packages
+      shell: DEBIAN_FRONTEND=noninteractive apt-get remove -y --purge kubeadm kubelet kubectl kubernetes-cni 2>/dev/null || true
+      changed_when: false
+
+    - name: Remove Kubernetes binaries
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /usr/local/bin/kubeadm
+        - /usr/local/bin/kubelet
+        - /usr/local/bin/kubectl
+
+    - name: Remove Kubernetes config and data directories
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/kubernetes
+        - /var/lib/kubelet
+        - /var/lib/etcd
+        - /root/.kube
+        - /etc/cni
+        - /opt/cni
+        - /var/lib/cni
+        - /run/flannel
+
+# ── 5. Remove containerd from all nodes ──────────────────────────────────────
+- name: Remove containerd from all nodes
+  hosts: all
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Stop and disable containerd
+      systemd:
+        name: containerd
+        state: stopped
+        enabled: false
+      ignore_errors: true
+
+    - name: Remove containerd RPM packages
+      shell: rpm -e --nodeps containerd containerd.io runc 2>/dev/null || true
+      changed_when: false
+
+    - name: Remove containerd DEB packages
+      shell: DEBIAN_FRONTEND=noninteractive apt-get remove -y --purge containerd containerd.io runc 2>/dev/null || true
+      changed_when: false
+
+    - name: Remove containerd binaries
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /usr/local/bin/containerd
+        - /usr/local/bin/containerd-shim
+        - /usr/local/bin/containerd-shim-runc-v1
+        - /usr/local/bin/containerd-shim-runc-v2
+        - /usr/local/bin/ctr
+        - /usr/local/sbin/runc
+        - /usr/local/bin/crictl
+
+    - name: Remove containerd systemd service
+      file:
+        path: /etc/systemd/system/containerd.service
+        state: absent
+      notify: reload systemd
+
+    - name: Remove containerd config and data
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/containerd
+        - "{{ containerd_config.root_dir | default('/var/lib/containerd') }}"
+
+    - name: Remove offline images directory
+      file:
+        path: "{{ airgap.offline_images_dir | default('/var/lib/k8s-offline-images') }}"
+        state: absent
+
+  handlers:
+    - name: reload systemd
+      systemd:
+        daemon_reload: true
+
+# ── 6. Clean up OS-level changes from common role ────────────────────────────
+- name: Clean up OS configuration on all nodes
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    _app_user: "{{ app_user | default('app') }}"
+  tasks:
+    - name: Remove k8s kernel modules config
+      file:
+        path: /etc/modules-load.d/k8s.conf
+        state: absent
+
+    - name: Remove k8s sysctl settings
+      sysctl:
+        name: "{{ item }}"
+        state: absent
+        reload: true
+      loop:
+        - net.bridge.bridge-nf-call-iptables
+        - net.bridge.bridge-nf-call-ip6tables
+        - net.ipv4.ip_forward
+      ignore_errors: true
+
+    - name: Remove k8s hosts block from /etc/hosts
+      blockinfile:
+        path: /etc/hosts
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - K8S CLUSTER"
+        state: absent
+
+    - name: Remove temporary installation files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /tmp/k8s-packages
+        - /tmp/k8s-bin
+        - /tmp/load-images.sh
+        - /tmp/k8s_join_commands.yml
+
+    - name: Remove app user (optional — set remove_app_user=true to enable)
+      user:
+        name: "{{ _app_user }}"
+        state: absent
+        remove: true
+      when:
+        - remove_app_user | default(false) | bool
+        - _app_user != 'app'

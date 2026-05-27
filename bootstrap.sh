@@ -149,9 +149,9 @@ collect_node_ips() {
     divider
     for ((i=1; i<=node_count; i++)); do
         if [[ "$role_label" == "Master" ]]; then
-            default_ip="10.10.10.1${i}"
+            default_ip="10.0.6.1${i}"
         else
-            default_ip="10.10.10.2${i}"
+            default_ip="10.0.6.2${i}"
         fi
         ask_inline node_ip "${role_label} ${i}" "$default_ip"
         ensure_ipv4 "$node_ip" "${role_label} ${i}"
@@ -184,13 +184,7 @@ ask CLUSTER_NAME "Cluster name" "k8s-cluster" \
 
 PROJECT_NAME="$CLUSTER_NAME"
 
-_existing_app_user=$(grep -E '^app_user:' group_vars/all.yml 2>/dev/null \
-    | sed 's/app_user:[[:space:]]*//' | tr -d '"' | tr -d "'" || true)
-APP_USER_DEFAULT="${_existing_app_user:-app_$(echo "$PROJECT_NAME" \
-    | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g' \
-    | sed 's/_\+/_/g' | sed 's/^_//; s/_$//')}"
-
-ask APP_USER "App user" "$APP_USER_DEFAULT" \
+ask APP_USER "App user" "app" \
     "Linux user được tạo trên tất cả node."
 
 PROJECT_SHORT_NAME_DEFAULT=$(build_project_prefix "$PROJECT_NAME")
@@ -251,7 +245,7 @@ if [ "$MASTER_COUNT" -gt 1 ]; then
     if [[ "$ENABLE_VIP" == "yes" || "$ENABLE_VIP" == "y" ]]; then
         VIP_ENABLED="true"
 
-        ask VIP_ADDRESS "VIP address" "10.10.10.100" \
+        ask VIP_ADDRESS "VIP address" "10.0.6.100" \
             "Địa chỉ ảo làm endpoint truy cập Kubernetes API Server."
 
         ask VIP_INTERFACE "VIP interface" "eth0" \

@@ -13,3 +13,7 @@
 - name: Join worker node to cluster
   command: "{{ join_vars.worker_join }}"
   when: not kubelet_conf.stat.exists
+
+- name: Label worker node with worker role
+  command: kubectl label node {{ inventory_hostname | lower }} node-role.kubernetes.io/worker= --overwrite
+  delegate_to: "{{ groups['masters'][0] }}"

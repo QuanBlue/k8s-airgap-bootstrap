@@ -26,3 +26,6 @@
     dest: /root/.kube/config
     remote_src: yes
     mode: '0600'
+
+- name: Label master node with control-plane and master roles
+  command: kubectl label node {{ inventory_hostname | lower }} node-role.kubernetes.io/control-plane= node-role.kubernetes.io/master= --overwrite

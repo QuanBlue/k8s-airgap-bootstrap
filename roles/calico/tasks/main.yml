@@ -35,7 +35,18 @@
   changed_when: "'created' in calico_apply.stdout or 'configured' in calico_apply.stdout"
   when: calico_check.rc != 0
 
-- name: Patch calico-node for VXLAN (env vars + remove BIRD from probes)
+- name: Patch calico-node env vars for VXLAN
+  shell: |
+    kubectl set env daemonset/calico-node -n kube-system \
+      CALICO_NETWORKING_BACKEND=vxlan \
+      CALICO_IPV4POOL_VXLAN=Always \
+      CALICO_IPV4POOL_IPIP=Never \
+      IP_AUTODETECTION_METHOD={{ calico_ip_autodetection_method }}
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  when: calico_networking_backend == 'vxlan'
+
+- name: Patch calico-node probes to remove BIRD dependency
   shell: |
     kubectl patch daemonset calico-node -n kube-system --type=strategic -p '
     {
@@ -44,21 +55,11 @@
           "spec": {
             "containers": [{
               "name": "calico-node",
-              "env": [
-                {"name": "CALICO_NETWORKING_BACKEND", "value": "vxlan"},
-                {"name": "CALICO_IPV4POOL_VXLAN", "value": "Always"},
-                {"name": "CALICO_IPV4POOL_IPIP", "value": "Never"},
-                {"name": "IP_AUTODETECTION_METHOD", "value": "{{ calico_ip_autodetection_method }}"}
-              ],
               "livenessProbe": {
-                "exec": {
-                  "command": ["/bin/calico-node", "-felix-live"]
-                }
+                "exec": {"command": ["/bin/calico-node", "-felix-live"]}
               },
               "readinessProbe": {
-                "exec": {
-                  "command": ["/bin/calico-node", "-felix-ready"]
-                }
+                "exec": {"command": ["/bin/calico-node", "-felix-ready"]}
               }
             }]
           }

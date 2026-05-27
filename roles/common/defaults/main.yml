@@ -1,2 +1,2 @@
 ---
-app_user: app_k8s  # overridden by group_vars/all.yml generated from bootstrap.sh
+app_user: app  # overridden by group_vars/all.yml generated from bootstrap.sh

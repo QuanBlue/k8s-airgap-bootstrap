@@ -13,6 +13,8 @@ This repository provides an automated, idempotent framework to deploy highly ava
 - **High Availability**: Optional VIP-based API Server HA using HAProxy and Keepalived.
 - **Modern Stack**: `containerd` as the container runtime, Calico CNI.
 - **Cluster Operations UX**: `k9s` is installed on master nodes for both `root` and `app_user`.
+- **Node Role Labels**: Master nodes are automatically labeled `control-plane` + `master`; worker nodes are labeled `worker`.
+- **Full Teardown**: A dedicated playbook to cleanly remove everything installed by `site.yml`.
 - **Production-Ready**: Built following enterprise best practices for Ansible and Kubernetes.
 
 ## Prerequisites
@@ -35,9 +37,17 @@ This repository provides an automated, idempotent framework to deploy highly ava
    ./scripts/download-artifacts.sh
    ```
 3. Transfer the repository and artifacts to the air-gapped control node.
-4. Run the Ansible playbook:
+4. Deploy the cluster:
    ```bash
    ansible-playbook playbooks/site.yml
+   ```
+5. To tear down everything installed by step 4:
+   ```bash
+   # Keep the app user
+   ansible-playbook playbooks/teardown.yml
+
+   # Also remove the app user
+   ansible-playbook playbooks/teardown.yml -e remove_app_user=true
    ```
 
 ## Scripts
@@ -79,10 +89,14 @@ This repository provides an automated, idempotent framework to deploy highly ava
 3. `./scripts/download-artifacts.sh`
 4. `ansible-playbook playbooks/site.yml`
 
-If you want to undo the latest bootstrap-generated config:
-
+To undo the latest bootstrap-generated config:
 ```bash
 ./scripts/bootstrap-clean.sh
+```
+
+To tear down the entire cluster and all installed components:
+```bash
+ansible-playbook playbooks/teardown.yml
 ```
 
 ## Documentation
@@ -93,7 +107,7 @@ If you want to undo the latest bootstrap-generated config:
 
 ## Structure
 
-- `playbooks/`: Ansible playbooks for different stages of deployment.
+- `playbooks/`: Ansible playbooks — `site.yml` (deploy), `teardown.yml` (remove), `prepare.yml`, `ha.yml`, `kubernetes.yml`.
 - `roles/`: Reusable Ansible roles (`common`, `containerd`, `kubernetes`, etc.).
 - `inventories/`: Generated host inventories.
 - `group_vars/` / `host_vars/`: Configuration variables.
@@ -109,4 +123,4 @@ Generated hostnames follow the template `<ProjectShortName>-<Env>-<Role>-<Num>`,
 - `DMS4-Prod-Mariadb-01`
 - `DMS4-Stag-Mongodb-01`
 
-The bootstrap flow also generates `project_short_name` and a default application user variable in `group_vars/all.yml` as `app_<project_name>`.
+The bootstrap flow also generates `project_short_name` and a default application user variable (`app_user`) in `group_vars/all.yml`. The default value is `app`; you can change it during `./bootstrap.sh`. If an `app` user already exists on the nodes and you choose a different name, Ansible will automatically rename the user and move its home directory.

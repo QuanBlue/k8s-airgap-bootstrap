@@ -1,5 +1,5 @@
 ---
-app_user: app_k8s
+app_user: app
 
 airgap:
   enabled: true
