@@ -21,6 +21,31 @@ BACKUP_ROOT=".bootstrap-backups"
 _STEP=0
 _TOTAL=5  # reduced to 4 if single master (no HA section)
 
+# ─── CLI ──────────────────────────────────────────────────────────────────────
+usage() {
+    cat <<EOF
+Usage: ./scripts/bootstrap.sh [--rollback]
+
+  (no args)      Run the interactive wizard. Generates inventories/inventory.ini
+                 and inventories/group_vars/{all,masters,workers}.yml.
+                 The previous versions of those files are snapshotted into
+                 .bootstrap-backups/<timestamp>/ before being overwritten.
+
+  --rollback     Restore the latest snapshot (undoes the most recent wizard
+                 run). No prompts. Does not touch any cluster state.
+
+  -h, --help     Show this help.
+EOF
+}
+
+MODE="wizard"
+case "${1:-}" in
+    "")             MODE="wizard" ;;
+    --rollback)     MODE="rollback" ;;
+    -h|--help)      usage; exit 0 ;;
+    *)              echo "Unknown argument: $1" >&2; usage; exit 1 ;;
+esac
+
 # ─── UI Helpers ───────────────────────────────────────────────────────────────
 banner() {
     echo
@@ -178,7 +203,59 @@ backup_file() {
     fi
 }
 
+# ─── Rollback helpers ─────────────────────────────────────────────────────────
+rollback_log()     { echo -e "${BLUE}INFO${NC} $1"; }
+rollback_success() { echo -e "${GREEN}PASS${NC} $1"; }
+rollback_fail()    { echo -e "${RED}FAIL${NC} $1"; exit 1; }
+
+latest_backup_dir() {
+    find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1
+}
+
+restore_from_backup() {
+    local backup_dir="$1"
+    local manifest_file="$backup_dir/manifest.txt"
+
+    [[ -f "$manifest_file" ]] || rollback_fail "Backup manifest not found: $manifest_file"
+
+    while IFS='|' read -r relative_path entry_type; do
+        [[ -n "$relative_path" ]] || continue
+        if [[ "$entry_type" == "file" ]]; then
+            mkdir -p "$(dirname "$relative_path")"
+            cp "$backup_dir/$relative_path" "$relative_path"
+            echo -e "${GREEN}RESTORE${NC} $relative_path"
+        else
+            rm -f "$relative_path"
+            echo -e "${YELLOW}REMOVE${NC}  $relative_path"
+        fi
+    done < "$manifest_file"
+}
+
+run_rollback() {
+    echo
+    echo -e "${BOLD}${CYAN}========================================${NC}"
+    echo -e "${BOLD}${CYAN}Bootstrap Rollback${NC}"
+    echo -e "${BOLD}${CYAN}========================================${NC}"
+
+    [[ -d "$BACKUP_ROOT" ]] || rollback_fail "No bootstrap backup directory found. Nothing to rollback."
+
+    local latest
+    latest=$(latest_backup_dir)
+    [[ -n "$latest" ]] || rollback_fail "No bootstrap backup found. Nothing to rollback."
+
+    rollback_log "Rolling back bootstrap changes from $(basename "$latest")"
+    restore_from_backup "$latest"
+    rollback_success "Bootstrap rollback completed. Repository files are back to the state before the latest bootstrap run."
+}
+
 # ═══════════════════════════════════════════════════════════════════════════════
+
+if [[ "$MODE" == "rollback" ]]; then
+    run_rollback
+    exit 0
+fi
+
+# ─── Wizard ───────────────────────────────────────────────────────────────────
 
 banner
 

@@ -6,9 +6,7 @@ Everything lives under `scripts/`. User-facing entry points sit at `scripts/`; i
 
 ```
 scripts/
-├── bootstrap.sh                  # interactive wizard
-├── bootstrap-clean.sh            # rollback bootstrap
-├── dry-run.sh                    # playbook syntax/check
+├── bootstrap.sh                  # interactive wizard (also `--rollback`)
 ├── download-artifacts.sh         # offline artifact pull/build
 └── helpers/
     ├── generate-inventory.sh     # invoked by bootstrap.sh
@@ -18,8 +16,7 @@ scripts/
 | Script | Purpose | Run on | Idempotent |
 |---|---|---|---|
 | `scripts/bootstrap.sh` | Interactive wizard — generates inventory + group_vars | Control node | ✅ (snapshots prior files) |
-| `scripts/bootstrap-clean.sh` | Rolls bootstrap back to the latest snapshot | Control node | ✅ |
-| `scripts/dry-run.sh` | Validates playbooks (syntax / check mode) | Control node | ✅ |
+| `scripts/bootstrap.sh --rollback` | Restores the latest bootstrap snapshot | Control node | ✅ |
 | `scripts/download-artifacts.sh` | Pulls every offline artifact (DEB, image, source, manifest) | Build machine (with internet) | ✅ (skips already-present files) |
 | `scripts/helpers/generate-inventory.sh` | Generates `inventories/inventory.ini` from CLI args | Control node (auto) | ✅ |
 | `scripts/helpers/load-images.sh` | Imports container image tarballs into containerd | Each cluster node (auto) | ✅ |
@@ -75,14 +72,14 @@ The wizard walks through the following sections (every prompt has a sensible def
 
 ---
 
-## `scripts/bootstrap-clean.sh`
+## `scripts/bootstrap.sh --rollback`
 
-Rolls back the config to the snapshot made by the most recent `bootstrap.sh` run. Reads the newest backup under `.bootstrap-backups/`.
+Rolls back the config to the snapshot made by the most recent `bootstrap.sh` wizard run. Reads the newest backup under `.bootstrap-backups/`.
 
 ### Usage
 
 ```bash
-./scripts/bootstrap-clean.sh
+./scripts/bootstrap.sh --rollback
 ```
 
 Restores every file listed in the backup manifest:
@@ -93,7 +90,7 @@ Restores every file listed in the backup manifest:
 
 ### When to use
 
-- After a bad `bootstrap.sh` answer set, to revert without re-typing everything.
+- After a bad wizard answer set, to revert without re-typing everything.
 - When trying multiple configurations and you want to return to the previous one.
 
 ---
