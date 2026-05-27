@@ -35,6 +35,16 @@
   changed_when: "'created' in calico_apply.stdout or 'configured' in calico_apply.stdout"
   when: calico_check.rc != 0
 
+- name: Wait for calico-node DaemonSet to be created before patching
+  command: kubectl get daemonset calico-node -n kube-system
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: calico_ds_ready
+  retries: 15
+  delay: 10
+  until: calico_ds_ready.rc == 0
+  when: calico_networking_backend == 'vxlan'
+
 - name: Patch calico-node env vars for VXLAN
   shell: |
     kubectl set env daemonset/calico-node -n kube-system \

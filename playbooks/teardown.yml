@@ -59,23 +59,9 @@
         enabled: false
       ignore_errors: true
 
-    - name: Remove HAProxy
-      package:
-        name: haproxy
-        state: absent
-      ignore_errors: true
-
-    - name: Remove Keepalived and related packages
-      package:
-        name:
-          - keepalived
-          - socat
-          - conntrack-tools
-          - conntrack
-          - ipset
-          - ipvsadm
-        state: absent
-      ignore_errors: true
+    - name: Remove HAProxy and Keepalived packages
+      shell: DEBIAN_FRONTEND=noninteractive apt-get remove -y --purge haproxy keepalived socat conntrack ipset ipvsadm 2>/dev/null || true
+      changed_when: false
 
     - name: Remove HAProxy config
       file:
@@ -128,12 +114,8 @@
         enabled: false
       ignore_errors: true
 
-    - name: Remove Kubernetes RPM packages
-      shell: rpm -e --nodeps kubeadm kubelet kubectl kubernetes-cni 2>/dev/null || true
-      changed_when: false
-
     - name: Remove Kubernetes DEB packages
-      shell: DEBIAN_FRONTEND=noninteractive apt-get remove -y --purge kubeadm kubelet kubectl kubernetes-cni 2>/dev/null || true
+      shell: DEBIAN_FRONTEND=noninteractive apt-get remove -y --purge kubelet kubernetes-cni 2>/dev/null || true
       changed_when: false
 
     - name: Remove Kubernetes binaries
@@ -171,14 +153,6 @@
         state: stopped
         enabled: false
       ignore_errors: true
-
-    - name: Remove containerd RPM packages
-      shell: rpm -e --nodeps containerd containerd.io runc 2>/dev/null || true
-      changed_when: false
-
-    - name: Remove containerd DEB packages
-      shell: DEBIAN_FRONTEND=noninteractive apt-get remove -y --purge containerd containerd.io runc 2>/dev/null || true
-      changed_when: false
 
     - name: Remove containerd binaries
       file:

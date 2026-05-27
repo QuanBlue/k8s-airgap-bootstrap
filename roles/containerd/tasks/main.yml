@@ -18,7 +18,7 @@
     path: /tmp/k8s-packages
     state: directory
 
-- name: Copy containerd offline packages (RPMs)
+- name: Copy offline packages to node
   copy:
     src: "{{ airgap.artifacts_dir }}/packages/"
     dest: /tmp/k8s-packages/
@@ -33,12 +33,11 @@
   fail:
     msg: >-
       Containerd archive was not found on the control node for {{ inventory_hostname }}.
-      Expected a file like containerd-*-linux-amd64.tar.gz from {{ airgap.artifacts_dir }}/bin.
-      Re-run ./scripts/download-artifacts.sh on the control node and verify the artifacts directory is mounted at {{ airgap.artifacts_dir }}.
+      Expected a file like containerd-*-linux-amd64.tar.gz in {{ airgap.artifacts_dir }}/bin.
+      Re-run ./scripts/download-artifacts.sh and verify the artifacts directory.
   when:
     - airgap.enabled | bool
     - containerd_archive_src | length == 0
-    - ansible_os_family != "RedHat"
 
 - name: Resolve crictl archive on control node
   set_fact:
@@ -58,7 +57,7 @@
     - airgap.enabled | bool
     - containerd_archive_src | length > 0
 
-- name: Ensure /usr/local/bin exists after containerd extraction
+- name: Ensure /usr/local/bin exists
   file:
     path: /usr/local/bin
     state: directory
@@ -81,19 +80,19 @@
     - airgap.enabled | bool
     - crictl_archive_src | length > 0
 
-- name: Install containerd from offline packages when binary archive is unavailable
-  shell: |
-    set -- /tmp/k8s-packages/containerd*.rpm /tmp/k8s-packages/containerd.io*.rpm /tmp/k8s-packages/runc*.rpm
-    if [ -e "$1" ]; then
-      yum localinstall -y "$@"
-    fi
-  when:
-    - airgap.enabled | bool
-    - ansible_os_family == "RedHat"
-    - containerd_archive_src | length == 0
-  ignore_errors: yes # Ignore if already installed or if using different package manager
+- name: Check for installed containerd binary
+  stat:
+    path: /usr/local/bin/containerd
+  register: local_containerd_binary
 
-- name: Install containerd systemd unit for binary deployment
+- name: Fail when containerd binary is unavailable after installation
+  fail:
+    msg: >-
+      /usr/local/bin/containerd is still missing on {{ inventory_hostname }}.
+      Verify the containerd archive exists in {{ airgap.artifacts_dir }}/bin.
+  when: not local_containerd_binary.stat.exists
+
+- name: Install containerd systemd unit
   copy:
     dest: /etc/systemd/system/containerd.service
     mode: '0644'
@@ -118,16 +117,10 @@
 
       [Install]
       WantedBy=multi-user.target
-  when:
-    - airgap.enabled | bool
-    - containerd_archive_src | length > 0
 
 - name: Reload systemd after installing containerd unit
   systemd:
     daemon_reload: yes
-  when:
-    - airgap.enabled | bool
-    - containerd_archive_src | length > 0
 
 - name: Ensure containerd config directory exists
   file:
@@ -139,19 +132,6 @@
     path: "{{ containerd_config.root_dir }}"
     state: directory
     mode: '0755'
-
-- name: Check for installed containerd binary
-  stat:
-    path: /usr/local/bin/containerd
-  register: local_containerd_binary
-
-- name: Fail when containerd binary is still unavailable after installation
-  fail:
-    msg: >-
-      /usr/local/bin/containerd is still missing on {{ inventory_hostname }} after the installation step.
-      Verify that the containerd archive exists in {{ airgap.artifacts_dir }}/bin and that the unarchive task completed successfully.
-  when:
-    - not local_containerd_binary.stat.exists
 
 - name: Generate default containerd config
   command: /usr/local/bin/containerd config default
@@ -183,7 +163,7 @@
     state: started
     enabled: yes
 
-- name: Copy offline images directory to target
+- name: Copy offline images to node
   copy:
     src: "{{ airgap.artifacts_dir }}/images/"
     dest: "{{ airgap.offline_images_dir }}/"

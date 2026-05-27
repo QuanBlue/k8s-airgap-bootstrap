@@ -1,17 +1,18 @@
 ---
-- name: Install HAProxy from offline packages
-  shell: yum localinstall -y /tmp/k8s-packages/haproxy*.rpm
-  when:
-    - airgap.enabled | bool
-    - ansible_os_family == "RedHat"
-  ignore_errors: yes
+- name: Install HAProxy from offline DEB package
+  shell: DEBIAN_FRONTEND=noninteractive dpkg -i /tmp/k8s-packages/haproxy*.deb
+  when: airgap.enabled | bool
+  register: haproxy_install
+  failed_when:
+    - haproxy_install.rc != 0
+    - "'already installed' not in haproxy_install.stderr"
+    - "'is already installed' not in haproxy_install.stdout"
 
-- name: Install HAProxy DEB package offline on Debian/Ubuntu
-  shell: DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/k8s-packages/haproxy*.deb
-  when:
-    - airgap.enabled | bool
-    - ansible_os_family == "Debian"
-  ignore_errors: yes
+- name: Ensure HAProxy config directory exists
+  file:
+    path: /etc/haproxy
+    state: directory
+    mode: '0755'
 
 - name: Configure HAProxy
   template:

@@ -41,19 +41,32 @@
     - airgap.enabled | bool
     - kubectl_binary_src | length > 0
 
-- name: Install Kubernetes components from offline packages
-  shell: yum localinstall -y /tmp/k8s-packages/kubeadm*.rpm /tmp/k8s-packages/kubelet*.rpm /tmp/k8s-packages/kubectl*.rpm /tmp/k8s-packages/kubernetes-cni*.rpm
-  when:
-    - airgap.enabled | bool
-    - ansible_os_family == "RedHat"
-  ignore_errors: yes
+- name: Install kubernetes-cni DEB package for CNI plugins
+  shell: DEBIAN_FRONTEND=noninteractive dpkg -i /tmp/k8s-packages/kubernetes-cni*.deb
+  when: airgap.enabled | bool
+  register: cni_install
+  failed_when:
+    - cni_install.rc != 0
+    - "'already installed' not in cni_install.stderr"
+    - "'is already installed' not in cni_install.stdout"
 
-- name: Install Kubernetes DEB packages offline on Debian/Ubuntu
-  shell: DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/k8s-packages/kubeadm*.deb /tmp/k8s-packages/kubelet*.deb /tmp/k8s-packages/kubectl*.deb /tmp/k8s-packages/kubernetes-cni*.deb
+- name: Install kubelet systemd service from DEB package
+  shell: DEBIAN_FRONTEND=noninteractive dpkg -i /tmp/k8s-packages/kubelet*.deb
+  when: airgap.enabled | bool
+  register: kubelet_deb_install
+  failed_when:
+    - kubelet_deb_install.rc != 0
+    - "'already installed' not in kubelet_deb_install.stderr"
+    - "'is already installed' not in kubelet_deb_install.stdout"
+
+- name: Override kubelet binary with airgap version
+  copy:
+    src: "{{ kubelet_binary_src }}"
+    dest: /usr/bin/kubelet
+    mode: '0755'
   when:
     - airgap.enabled | bool
-    - ansible_os_family == "Debian"
-  ignore_errors: yes
+    - kubelet_binary_src | length > 0
 
 - name: Ensure kubelet pod logs directory exists when customized
   file:
