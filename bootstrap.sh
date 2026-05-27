@@ -277,10 +277,12 @@ if [[ -n "$DATA_PARTITION_ROOT" ]]; then
     CONTAINERD_ROOT_DIR="${DATA_PARTITION_ROOT}/lib/containerd"
     OFFLINE_IMAGES_DIR="${DATA_PARTITION_ROOT}/lib/k8s-offline-images"
     KUBELET_POD_LOGS_DIR="${DATA_PARTITION_ROOT}/log/containerd"
+    AUDIT_LOG_DIR="${DATA_PARTITION_ROOT}/log/kubernetes/audit"
 else
     CONTAINERD_ROOT_DIR="/var/lib/containerd"
     OFFLINE_IMAGES_DIR="/var/lib/k8s-offline-images"
     KUBELET_POD_LOGS_DIR=""
+    AUDIT_LOG_DIR="/var/log/kubernetes/audit"
 fi
 
 # ─── Generate Files ───────────────────────────────────────────────────────────
@@ -350,6 +352,15 @@ airgap:
   enabled: true
   artifacts_dir: "{{ playbook_dir | dirname }}/artifacts"
   offline_images_dir: "$OFFLINE_IMAGES_DIR"
+
+# Kubernetes API Server audit logging
+kubernetes_audit:
+  enabled: true
+  log_dir: "$AUDIT_LOG_DIR"
+  policy_file: "/etc/kubernetes/audit/policy.yaml"
+  max_age: 90        # days
+  max_backup: 20     # rotated files
+  max_size: 100      # MB per file
 EOF
 
 cat <<EOF > inventories/group_vars/masters.yml

@@ -110,6 +110,37 @@
     state: started
     enabled: yes
 
+# Audit log setup — must exist on every master BEFORE kubeadm init/join so
+# the apiserver static pod can mount the policy file and log directory.
+- name: Ensure audit log directory exists
+  file:
+    path: "{{ kubernetes_audit.log_dir }}"
+    state: directory
+    mode: '0750'
+    owner: root
+    group: root
+  when:
+    - kubernetes_audit.enabled | default(false) | bool
+    - inventory_hostname in groups['masters']
+
+- name: Ensure audit policy directory exists
+  file:
+    path: "{{ kubernetes_audit.policy_file | dirname }}"
+    state: directory
+    mode: '0755'
+  when:
+    - kubernetes_audit.enabled | default(false) | bool
+    - inventory_hostname in groups['masters']
+
+- name: Install audit policy file
+  copy:
+    src: audit-policy.yaml
+    dest: "{{ kubernetes_audit.policy_file }}"
+    mode: '0644'
+  when:
+    - kubernetes_audit.enabled | default(false) | bool
+    - inventory_hostname in groups['masters']
+
 - include_tasks: master_init.yml
   when: inventory_hostname == groups['masters'][0]
 

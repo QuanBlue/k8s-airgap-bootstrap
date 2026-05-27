@@ -157,6 +157,12 @@
         - /opt/cni
         - /var/lib/cni
         - /run/flannel
+        - "{{ kubernetes_audit.log_dir | default('/var/log/kubernetes/audit') }}"
+
+    - name: Remove kubelet systemd drop-in
+      file:
+        path: /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
+        state: absent
 
 # ── 5. Remove containerd from all nodes ──────────────────────────────────────
 - name: Remove containerd from all nodes

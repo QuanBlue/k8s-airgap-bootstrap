@@ -10,6 +10,31 @@ controlPlaneEndpoint: "{{ hostvars[inventory_hostname]['ansible_host'] }}:6443"
 networking:
   podSubnet: "{{ network.pod_cidr }}"
   serviceSubnet: "{{ network.service_cidr }}"
+{% if kubernetes_audit.enabled | default(false) | bool %}
+apiServer:
+  extraArgs:
+    - name: audit-log-path
+      value: "{{ kubernetes_audit.log_dir }}/audit.log"
+    - name: audit-log-maxage
+      value: "{{ kubernetes_audit.max_age | default(30) }}"
+    - name: audit-log-maxbackup
+      value: "{{ kubernetes_audit.max_backup | default(10) }}"
+    - name: audit-log-maxsize
+      value: "{{ kubernetes_audit.max_size | default(100) }}"
+    - name: audit-policy-file
+      value: "{{ kubernetes_audit.policy_file }}"
+  extraVolumes:
+    - name: audit-log
+      hostPath: "{{ kubernetes_audit.log_dir }}"
+      mountPath: "{{ kubernetes_audit.log_dir }}"
+      readOnly: false
+      pathType: DirectoryOrCreate
+    - name: audit-policy
+      hostPath: "{{ kubernetes_audit.policy_file }}"
+      mountPath: "{{ kubernetes_audit.policy_file }}"
+      readOnly: true
+      pathType: File
+{% endif %}
 ---
 apiVersion: kubeadm.k8s.io/v1beta4
 kind: InitConfiguration

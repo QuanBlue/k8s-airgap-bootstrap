@@ -41,3 +41,12 @@ airgap:
   enabled: true
   artifacts_dir: "{{ playbook_dir | dirname }}/artifacts"
   offline_images_dir: "/u01/app/lib/k8s-offline-images"
+
+# Kubernetes API Server audit logging
+kubernetes_audit:
+  enabled: true
+  log_dir: "/u01/app/log/kubernetes/audit"
+  policy_file: "/etc/kubernetes/audit/policy.yaml"
+  max_age: 90        # days
+  max_backup: 20     # rotated files
+  max_size: 100      # MB per file
