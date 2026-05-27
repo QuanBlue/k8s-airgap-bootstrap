@@ -270,6 +270,7 @@ Full mapping (including ⚠️ partial / ❌ todo items): [`docs/cis-compliance.
   - [x] TLS minimum version + cipher suite restriction
   - [x] API audit logging
   - [x] Kubelet serving cert rotation
+  - [x] `tlsCipherSuites` restriction (CIS 4.2.13)
 - [x] Addons
   - [x] Calico (VXLAN)
   - [x] metrics-server (2 replicas + limits)
@@ -277,7 +278,6 @@ Full mapping (including ⚠️ partial / ❌ todo items): [`docs/cis-compliance.
 - [ ] Encryption at rest for etcd Secrets (CIS 1.2.25)
 - [ ] Pod Security Admission `restricted` profile (CIS 5.2.x)
 - [ ] Default deny-all NetworkPolicy per namespace (CIS 5.3.2)
-- [ ] `tlsCipherSuites` restriction for kubelet (CIS 4.2.13)
 - [ ] Optional ingress-nginx + MetalLB roles (skeletons exist)
 
 # :busts_in_silhouette: Contributors

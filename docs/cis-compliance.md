@@ -212,6 +212,5 @@ ansible masters -b -o -a "openssl s_client -connect localhost:6443 -tls1_2 -ciph
 
 - [ ] CIS 1.2.25 — EncryptionConfig for etcd secrets
 - [ ] CIS 1.3.2 / 1.4.1 — `--profiling=false` for controller-manager + scheduler
-- [ ] CIS 4.2.13 — `tlsCipherSuites` for kubelet
 - [ ] CIS 5.2.x — Pod Security Admission `restricted` profile
 - [ ] CIS 5.3.2 — Default deny-all NetworkPolicy
