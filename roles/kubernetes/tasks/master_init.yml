@@ -5,13 +5,14 @@
   register: kubeadm_admin_conf
 
 # admin.conf can exist from a previous (partial) run while apiserver is dead.
-# Probe the local apiserver to decide whether the cluster is REALLY healthy.
+# Probe via kubectl with the existing admin.conf (anonymous-auth is disabled
+# on the apiserver, so anonymous /livez probes return 401 even when healthy).
 - name: Probe local apiserver to detect stale state
-  uri:
-    url: "https://{{ hostvars[inventory_hostname]['ansible_host'] }}:6443/livez"
-    validate_certs: false
-    status_code: 200
-    timeout: 5
+  shell: |
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf \
+      --server=https://{{ hostvars[inventory_hostname]['ansible_host'] }}:6443 \
+      --request-timeout=5s \
+      get --raw=/livez
   register: apiserver_probe
   failed_when: false
   changed_when: false
@@ -19,7 +20,7 @@
 
 - name: Set fact for cluster needing init
   set_fact:
-    cluster_needs_init: "{{ (not kubeadm_admin_conf.stat.exists) or (apiserver_probe.status | default(-1) != 200) }}"
+    cluster_needs_init: "{{ (not kubeadm_admin_conf.stat.exists) or (apiserver_probe.rc | default(1) != 0) }}"
 
 - name: Create kubeadm config directory
   file:
@@ -77,14 +78,12 @@
   changed_when: false
 
 - name: Wait for local apiserver to be healthy
-  uri:
-    url: "https://{{ hostvars[inventory_hostname]['ansible_host'] }}:6443/livez"
-    validate_certs: false
-    status_code: 200
+  command: kubectl --kubeconfig=/etc/kubernetes/admin-local.conf --request-timeout=5s get --raw=/livez
   register: apiserver_local
-  until: apiserver_local.status == 200
+  until: apiserver_local.rc == 0
   retries: 30
   delay: 2
+  changed_when: false
   when: kubeadm_admin_conf_post.stat.exists
 
 - name: Generate join command for masters

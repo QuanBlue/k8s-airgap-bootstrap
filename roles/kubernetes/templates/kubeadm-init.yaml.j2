@@ -10,9 +10,14 @@ controlPlaneEndpoint: "{{ hostvars[inventory_hostname]['ansible_host'] }}:6443"
 networking:
   podSubnet: "{{ network.pod_cidr }}"
   serviceSubnet: "{{ network.service_cidr }}"
-{% if kubernetes_audit.enabled | default(false) | bool %}
 apiServer:
   extraArgs:
+    # Stays true during init/join because kubeadm join reads cluster-info
+    # ConfigMap anonymously. The post-init hardening play patches each
+    # master's apiserver static pod to --anonymous-auth=false (CIS 1.2.1).
+    - name: anonymous-auth
+      value: "true"
+{% if kubernetes_audit.enabled | default(false) | bool %}
     - name: audit-log-path
       value: "{{ kubernetes_audit.log_dir }}/audit.log"
     - name: audit-log-maxage
@@ -47,6 +52,12 @@ nodeRegistration:
 apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration
 cgroupDriver: systemd
+# CIS 4.2.12 — request a CA-signed serving cert and rotate it on expiry.
+# CSRs for kubelet-serving are issued in Pending state; the hardening play
+# approves them after each node joins.
+serverTLSBootstrap: true
+featureGates:
+  RotateKubeletServerCertificate: true
 {% if kubelet.pod_logs_dir | default('') | length > 0 %}
 podLogsDir: "{{ kubelet.pod_logs_dir }}"
 {% endif %}

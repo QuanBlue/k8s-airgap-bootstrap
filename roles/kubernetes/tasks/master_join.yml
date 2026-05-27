@@ -35,14 +35,12 @@
   changed_when: false
 
 - name: Wait for local apiserver to be healthy
-  uri:
-    url: "https://{{ hostvars[inventory_hostname]['ansible_host'] }}:6443/livez"
-    validate_certs: false
-    status_code: 200
+  command: kubectl --kubeconfig=/etc/kubernetes/admin-local.conf --request-timeout=5s get --raw=/livez
   register: apiserver_local
-  until: apiserver_local.status == 200
+  until: apiserver_local.rc == 0
   retries: 30
   delay: 2
+  changed_when: false
 
 - name: Label master node with control-plane and master roles
   command: kubectl --kubeconfig /etc/kubernetes/admin-local.conf label node {{ inventory_hostname | lower }} node-role.kubernetes.io/control-plane= node-role.kubernetes.io/master= --overwrite

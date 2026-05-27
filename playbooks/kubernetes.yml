@@ -21,3 +21,16 @@
   roles:
     - calico
     - metrics-server
+
+# Runs after every master has joined and addons are deployed. Patches the
+# apiserver static pod on each master to disable anonymous-auth.
+- name: Post-init API server hardening
+  hosts: masters
+  become: true
+  serial: 1   # patch one master at a time so the cluster stays available
+  module_defaults:
+    ansible.builtin.gather_facts:
+      gather_timeout: 30
+  tags: ['hardening']
+  roles:
+    - kubernetes-hardening

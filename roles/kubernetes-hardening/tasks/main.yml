@@ -1,0 +1,68 @@
+---
+# Post-init security hardening for the kube-apiserver.
+#
+# Runs on every master AFTER all control-plane and worker joins are done.
+# kubelet watches /etc/kubernetes/manifests/, so editing the static pod file
+# triggers an apiserver restart on that node. HA topology (HAProxy + multiple
+# masters) keeps the API reachable through the rolling restart.
+
+- name: Disable anonymous auth on kube-apiserver (CIS 1.2.1)
+  replace:
+    path: /etc/kubernetes/manifests/kube-apiserver.yaml
+    regexp: '(\s+- --anonymous-auth=)true(\s*)$'
+    replace: '\1false\2'
+  register: anonymous_auth_patch
+
+# kubelet's default httpGet probes (/livez, /readyz, /healthz) hit the
+# apiserver anonymously, which now returns 401 → kubelet kills the pod in a
+# crash loop. Convert the three probes to tcpSocket so they don't need auth.
+- name: Convert kube-apiserver probes from httpGet to tcpSocket
+  shell: |
+    python3 <<'PY'
+    import re
+    p = '/etc/kubernetes/manifests/kube-apiserver.yaml'
+    with open(p) as f:
+        text = f.read()
+    # Port can be numeric (6443) or a named port (probe-port). Match both.
+    new_text = re.sub(
+        r'( +)httpGet:\n +host: \S+\n +path: \S+\n +port: (\S+)\n +scheme: HTTPS',
+        lambda m: f"{m.group(1)}tcpSocket:\n{m.group(1)}  port: {m.group(2)}",
+        text,
+    )
+    if new_text != text:
+        with open(p, 'w') as f:
+            f.write(new_text)
+        print('changed')
+    else:
+        print('no change')
+    PY
+  register: probe_patch
+  changed_when: "'changed' in probe_patch.stdout"
+
+- name: Wait for apiserver to settle after hardening patches
+  command: kubectl --kubeconfig=/etc/kubernetes/admin-local.conf --request-timeout=5s get --raw=/livez
+  register: apiserver_recovered
+  until: apiserver_recovered.rc == 0
+  retries: 60
+  delay: 3
+  changed_when: false
+  when: anonymous_auth_patch.changed or probe_patch.changed
+
+# serverTLSBootstrap=true makes every kubelet issue a kubelet-serving CSR
+# that stays in Pending state until approved. Without approval, kubelet keeps
+# using a self-signed cert and `kubectl logs / exec` from apiserver fails
+# verification. Approve all pending kubelet-serving CSRs (airgap = trusted env).
+- name: Approve pending kubelet-serving CSRs (CIS 4.2.12)
+  shell: |
+    set -o pipefail
+    kubectl --kubeconfig=/etc/kubernetes/admin-local.conf get csr \
+      -o custom-columns='NAME:.metadata.name,SIGNER:.spec.signerName,COND:.status.conditions[0].type' \
+      --no-headers 2>/dev/null \
+      | awk '$2=="kubernetes.io/kubelet-serving" && $3=="<none>" {print $1}' \
+      | xargs -r -n1 kubectl --kubeconfig=/etc/kubernetes/admin-local.conf certificate approve
+  args:
+    executable: /bin/bash
+  run_once: true
+  delegate_to: "{{ groups['masters'][0] }}"
+  register: csr_approval
+  changed_when: csr_approval.stdout | length > 0
