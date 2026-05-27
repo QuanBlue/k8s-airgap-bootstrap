@@ -191,14 +191,14 @@ Every filesystem-heavy path can be relocated onto a custom partition (e.g. `/u01
 | Kubelet pod logs | (kubelet default) | `/u01/app/log/containerd` |
 | Audit logs | `/var/log/kubernetes/audit` | `/u01/app/log/kubernetes/audit` |
 
-Set via the `bootstrap.sh` wizard → "Data partition root".
+Set via the `scripts/bootstrap.sh` wizard → "Data partition root".
 
 ---
 
 ## Idempotency
 
 Every playbook + script is safe to re-run:
-- `bootstrap.sh` snapshots prior files before overwrite
+- `scripts/bootstrap.sh` snapshots prior files before overwrite
 - `download-artifacts.sh` skips files already present (HAProxy tarball is idempotent too)
 - App-user rename: shell logic verifies state before acting
 - kubeadm init: probes apiserver `/livez`; if unreachable, resets and re-inits

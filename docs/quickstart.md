@@ -7,7 +7,7 @@ This guide provides a rapid walkthrough for deploying a Kubernetes cluster using
 Run the interactive bootstrap script to generate your inventory and variables:
 
 ```bash
-./bootstrap.sh
+./scripts/bootstrap.sh
 ```
 
 You will be prompted for:

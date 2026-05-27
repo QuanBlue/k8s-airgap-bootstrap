@@ -175,7 +175,7 @@ Example scripts:
 
 ```bash
 ./scripts/download-artifacts.sh
-./scripts/load-images.sh
+./scripts/helpers/load-images.sh
 ```
 
 ---

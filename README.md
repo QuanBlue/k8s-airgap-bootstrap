@@ -30,7 +30,7 @@ This repository provides an automated, idempotent framework to deploy highly ava
 
 1. Run the bootstrap script to interactively generate your inventory and variables:
    ```bash
-   ./bootstrap.sh
+   ./scripts/bootstrap.sh
    ```
 2. Download offline artifacts on an internet-connected machine:
    ```bash
@@ -56,11 +56,12 @@ Full reference (args, idempotency, env vars, output paths): [`docs/scripts.md`](
 
 | Script | Purpose |
 |---|---|
-| `./bootstrap.sh` | Interactive wizard — generates inventory + group_vars |
+| `./scripts/bootstrap.sh` | Interactive wizard — generates inventory + group_vars |
 | `./scripts/bootstrap-clean.sh` | Rolls bootstrap back to the latest snapshot |
-| `./scripts/generate-inventory.sh` | Generates inventory.ini from CLI args (called by `bootstrap.sh`) |
+| `./scripts/dry-run.sh` | Validates playbooks (syntax / check mode) without touching real files |
 | `./scripts/download-artifacts.sh` | Downloads every offline artifact (DEBs, binaries, HAProxy source build, images) |
-| `./scripts/load-images.sh` | Imports container image tarballs into containerd (run by Ansible) |
+| `./scripts/helpers/generate-inventory.sh` | Generates `inventories/inventory.ini` from CLI args (called by `bootstrap.sh`) |
+| `./scripts/helpers/load-images.sh` | Imports container image tarballs into containerd (run by Ansible) |
 
 ### Recommended workflow
 
@@ -69,7 +70,7 @@ Full reference (args, idempotency, env vars, output paths): [`docs/scripts.md`](
 ./scripts/download-artifacts.sh
 
 # 2. Copy the repo + artifacts to the airgap control node, then:
-./bootstrap.sh
+./scripts/bootstrap.sh
 ansible-playbook playbooks/site.yml
 ```
 
@@ -111,4 +112,4 @@ Generated hostnames follow the template `<ProjectShortName>-<Env>-<Role>-<Num>`,
 - `DMS4-Prod-Mariadb-01`
 - `DMS4-Stag-Mongodb-01`
 
-The bootstrap flow also generates `project_short_name` and a default application user variable (`app_user`) in `group_vars/all.yml`. The default value is `app`; you can change it during `./bootstrap.sh`. If an `app` user already exists on the nodes and you choose a different name, Ansible will automatically rename the user and move its home directory.
+The bootstrap flow also generates `project_short_name` and a default application user variable (`app_user`) in `group_vars/all.yml`. The default value is `app`; you can change it when running `./scripts/bootstrap.sh`. If an `app` user already exists on the nodes and you choose a different name, Ansible will automatically rename the user and move its home directory.

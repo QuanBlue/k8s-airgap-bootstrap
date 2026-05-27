@@ -11,6 +11,12 @@ BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
 
+# Always operate from the repository root so relative paths below
+# (inventories/, .bootstrap-backups/, scripts/helpers/) resolve no matter
+# where the user invokes the script from.
+ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$ROOT_DIR"
+
 BACKUP_ROOT=".bootstrap-backups"
 _STEP=0
 _TOTAL=5  # reduced to 4 if single master (no HA section)
@@ -296,7 +302,7 @@ backup_file "inventories/group_vars/all.yml"        "$BACKUP_DIR"
 backup_file "inventories/group_vars/masters.yml"    "$BACKUP_DIR"
 backup_file "inventories/group_vars/workers.yml"    "$BACKUP_DIR"
 
-bash ./scripts/generate-inventory.sh \
+bash ./scripts/helpers/generate-inventory.sh \
     --environment-name             "$ENVIRONMENT_NAME" \
     --hostname-cluster-number      "$HOSTNAME_CLUSTER_NUMBER" \
     --master-count                 "$MASTER_COUNT" \

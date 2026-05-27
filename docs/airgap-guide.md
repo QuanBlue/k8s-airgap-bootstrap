@@ -68,13 +68,13 @@ tar -xzvf k8s-airgap-bundle.tar.gz
 cd k8s-airgap-bootstrap
 
 # Generate inventory + group_vars
-./bootstrap.sh
+./scripts/bootstrap.sh
 
 # Deploy
 ansible-playbook playbooks/site.yml
 ```
 
-The `containerd` role automatically copies `scripts/load-images.sh` and the entire `artifacts/images/` directory to every node, then runs the script to `ctr -n k8s.io images import` every tar before `kubeadm init` / `join`.
+The `containerd` role automatically copies `scripts/helpers/load-images.sh` and the entire `artifacts/images/` directory to every node, then runs the script to `ctr -n k8s.io images import` every tar before `kubeadm init` / `join`.
 
 ## Troubleshooting
 

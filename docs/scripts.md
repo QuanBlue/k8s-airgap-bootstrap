@@ -2,17 +2,31 @@
 
 Every script in the repo, what it does, arguments, and when to run it.
 
+Everything lives under `scripts/`. User-facing entry points sit at `scripts/`; internal helpers called by automation live in `scripts/helpers/`.
+
+```
+scripts/
+├── bootstrap.sh                  # interactive wizard
+├── bootstrap-clean.sh            # rollback bootstrap
+├── dry-run.sh                    # playbook syntax/check
+├── download-artifacts.sh         # offline artifact pull/build
+└── helpers/
+    ├── generate-inventory.sh     # invoked by bootstrap.sh
+    └── load-images.sh            # invoked by the containerd role
+```
+
 | Script | Purpose | Run on | Idempotent |
 |---|---|---|---|
-| `bootstrap.sh` | Interactive wizard — generates inventory + group_vars | Control node | ✅ (snapshots prior files) |
+| `scripts/bootstrap.sh` | Interactive wizard — generates inventory + group_vars | Control node | ✅ (snapshots prior files) |
 | `scripts/bootstrap-clean.sh` | Rolls bootstrap back to the latest snapshot | Control node | ✅ |
-| `scripts/generate-inventory.sh` | Generates `inventories/inventory.ini` from CLI args | Control node | ✅ |
+| `scripts/dry-run.sh` | Validates playbooks (syntax / check mode) | Control node | ✅ |
 | `scripts/download-artifacts.sh` | Pulls every offline artifact (DEB, image, source, manifest) | Build machine (with internet) | ✅ (skips already-present files) |
-| `scripts/load-images.sh` | Imports container image tarballs into containerd | Each cluster node | ✅ |
+| `scripts/helpers/generate-inventory.sh` | Generates `inventories/inventory.ini` from CLI args | Control node (auto) | ✅ |
+| `scripts/helpers/load-images.sh` | Imports container image tarballs into containerd | Each cluster node (auto) | ✅ |
 
 ---
 
-## `bootstrap.sh`
+## `scripts/bootstrap.sh`
 
 Interactive wizard. Generates `inventories/inventory.ini` and `inventories/group_vars/{all,masters,workers}.yml` from the answers you provide.
 
@@ -84,7 +98,7 @@ Restores every file listed in the backup manifest:
 
 ---
 
-## `scripts/generate-inventory.sh`
+## `scripts/helpers/generate-inventory.sh`
 
 Generates `inventories/inventory.ini`. Called internally by `bootstrap.sh` but can also be invoked directly.
 
@@ -106,7 +120,7 @@ Generates `inventories/inventory.ini`. Called internally by `bootstrap.sh` but c
 ### Example
 
 ```bash
-./scripts/generate-inventory.sh \
+./scripts/helpers/generate-inventory.sh \
     --environment-name Prod \
     --hostname-cluster-number 1 \
     --master-count 3 \
@@ -200,7 +214,7 @@ The script bails out early if:
 
 ---
 
-## `scripts/load-images.sh`
+## `scripts/helpers/load-images.sh`
 
 Loads every container image tar into the containerd `k8s.io` namespace. **Not invoked directly** — the `containerd` role copies it to each node and runs it.
 
@@ -208,9 +222,9 @@ Loads every container image tar into the containerd `k8s.io` namespace. **Not in
 
 ```bash
 ctr namespace ls   # verify k8s.io namespace exists
-./scripts/load-images.sh /var/lib/k8s-offline-images
+./scripts/helpers/load-images.sh /var/lib/k8s-offline-images
 # Or the data-partition path:
-./scripts/load-images.sh /u01/app/lib/k8s-offline-images
+./scripts/helpers/load-images.sh /u01/app/lib/k8s-offline-images
 ```
 
 ### Behavior
@@ -240,7 +254,7 @@ rsync -av k8s-airgap-bootstrap/ user@control-node:/path/to/
 
 # Step 3: On the control node, generate inventory + config
 cd /path/to/k8s-airgap-bootstrap
-./bootstrap.sh
+./scripts/bootstrap.sh
 
 # Step 4: Deploy
 ansible-playbook playbooks/site.yml

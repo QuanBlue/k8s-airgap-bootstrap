@@ -10,7 +10,7 @@ BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
 
-ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 DEFAULT_PLAYBOOK="playbooks/site.yml"
 DEFAULT_INVENTORY="inventories/inventory.ini"
 MODE="syntax"
@@ -20,7 +20,7 @@ ANSIBLE_TMP_BASE="${TMPDIR:-/tmp}/ansible-dry-run"
 
 usage() {
     cat <<EOF
-Usage: ./dry-run.sh [options]
+Usage: ./scripts/dry-run.sh [options]
 
 Options:
   --mode <syntax|check>     Validation mode. Default: syntax
@@ -29,8 +29,8 @@ Options:
   --help                    Show this help message
 
 Examples:
-  ./dry-run.sh
-  ./dry-run.sh --mode check --inventory inventories/inventory.ini
+  ./scripts/dry-run.sh
+  ./scripts/dry-run.sh --mode check --inventory inventories/inventory.ini
 EOF
 }
 
@@ -382,9 +382,9 @@ else
 fi
 
 log "Running shell syntax validation"
-bash -n bootstrap.sh
-bash -n scripts/generate-inventory.sh
-bash -n dry-run.sh
+bash -n scripts/bootstrap.sh
+bash -n scripts/helpers/generate-inventory.sh
+bash -n scripts/dry-run.sh
 success "Shell scripts passed syntax check"
 
 TMP_DIR=$(mktemp -d /tmp/k8s-airgap-dry-run.XXXXXX)
@@ -397,7 +397,8 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p "$SANDBOX_DIR"
-cp -R ansible.cfg bootstrap.sh playbooks roles scripts inventories group_vars "$SANDBOX_DIR"
+cp -R ansible.cfg playbooks roles scripts inventories "$SANDBOX_DIR" 2>/dev/null
+cp -R group_vars "$SANDBOX_DIR" 2>/dev/null || true
 
 log "Generating preview in isolated sandbox"
 BOOTSTRAP_INPUT="$TMP_DIR/bootstrap-input.txt"
@@ -435,7 +436,7 @@ BOOTSTRAP_INPUT="$TMP_DIR/bootstrap-input.txt"
     printf '%s\n' "$DATA_PARTITION_ROOT"
 } > "$BOOTSTRAP_INPUT"
 
-if ! (cd "$SANDBOX_DIR" && bash ./bootstrap.sh < "$BOOTSTRAP_INPUT" > "$TMP_DIR/bootstrap.log" 2>&1); then
+if ! (cd "$SANDBOX_DIR" && bash ./scripts/bootstrap.sh < "$BOOTSTRAP_INPUT" > "$TMP_DIR/bootstrap.log" 2>&1); then
     cat "$TMP_DIR/bootstrap.log"
     fail "Bootstrap preview failed in sandbox."
 fi
