@@ -1,0 +1,63 @@
+---
+- name: Copy metrics-server manifest to master
+  copy:
+    src: "{{ airgap.artifacts_dir }}/manifests/metrics-server.yaml"
+    dest: /etc/kubernetes/metrics-server.yaml
+    mode: '0644'
+  when: airgap.enabled | bool
+
+# kubeadm cluster kubelets serve metrics with self-signed certs by default,
+# so metrics-server must skip TLS verification or it crashloops with
+# "x509: cannot validate certificate ... because it doesn't contain any IP SANs".
+# lineinfile is idempotent — re-runs do not duplicate the arg.
+- name: Add --kubelet-insecure-tls to metrics-server args
+  lineinfile:
+    path: /etc/kubernetes/metrics-server.yaml
+    line: '        - --kubelet-insecure-tls'
+    insertafter: '^\s+- --metric-resolution='
+    state: present
+
+- name: Apply metrics-server manifest
+  command: kubectl apply -f /etc/kubernetes/metrics-server.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: metrics_apply
+  changed_when: "'created' in metrics_apply.stdout or 'configured' in metrics_apply.stdout"
+
+- name: Patch metrics-server with replicas and resource limits
+  shell: |
+    kubectl patch deployment/metrics-server -n kube-system --type=strategic -p '
+    {
+      "spec": {
+        "replicas": {{ metrics_server.replicas }},
+        "template": {
+          "spec": {
+            "containers": [{
+              "name": "metrics-server",
+              "resources": {
+                "requests": {
+                  "cpu":    "{{ metrics_server.resources.requests.cpu }}",
+                  "memory": "{{ metrics_server.resources.requests.memory }}"
+                },
+                "limits": {
+                  "cpu":    "{{ metrics_server.resources.limits.cpu }}",
+                  "memory": "{{ metrics_server.resources.limits.memory }}"
+                }
+              }
+            }]
+          }
+        }
+      }
+    }'
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: metrics_patch
+  changed_when: "'no change' not in metrics_patch.stdout"
+
+- name: Wait for metrics-server rollout
+  command: kubectl rollout status deployment/metrics-server -n kube-system --timeout=180s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: metrics_ready
+  failed_when: false
+  changed_when: false

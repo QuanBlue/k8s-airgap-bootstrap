@@ -17,6 +17,7 @@ CRICTL_VERSION="${CRICTL_VERSION:-v1.36.0}"
 HELM_VERSION="${HELM_VERSION:-3.20.1}"
 K9S_VERSION="${K9S_VERSION:-v0.50.18}"
 HAPROXY_VERSION="${HAPROXY_VERSION:-3.2.0}"
+METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-v0.8.1}"
 IMAGE_PLATFORM="${IMAGE_PLATFORM:-linux/amd64}"
 
 mkdir -p "$BIN_DIR" "$PKGS_DIR" "$IMAGES_DIR" "$MANIFESTS_DIR"
@@ -290,6 +291,9 @@ download_manifests() {
     download_file \
         "https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/calico.yaml" \
         "$MANIFESTS_DIR/calico.yaml"
+    download_file \
+        "https://github.com/kubernetes-sigs/metrics-server/releases/download/${METRICS_SERVER_VERSION}/components.yaml" \
+        "$MANIFESTS_DIR/metrics-server.yaml"
 }
 
 pull_and_save() {
@@ -350,6 +354,11 @@ download_container_images() {
     for image in $calico_images; do
         pull_and_save "$image"
     done
+
+    metrics_images=$(grep 'image:' "$MANIFESTS_DIR/metrics-server.yaml" | awk '{print $2}' | sed 's/"//g' | sort -u)
+    for image in $metrics_images; do
+        pull_and_save "$image"
+    done
 }
 
 write_manifest() {
@@ -362,6 +371,7 @@ write_manifest() {
         echo "HELM_VERSION=$HELM_VERSION"
         echo "K9S_VERSION=$K9S_VERSION"
         echo "HAPROXY_VERSION=$HAPROXY_VERSION"
+        echo "METRICS_SERVER_VERSION=$METRICS_SERVER_VERSION"
         echo "IMAGE_PLATFORM=$IMAGE_PLATFORM"
         echo
         echo "[bin]"

@@ -20,3 +20,4 @@
   tags: ['addons']
   roles:
     - calico
+    - metrics-server

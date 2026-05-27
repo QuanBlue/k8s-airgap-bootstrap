@@ -1,0 +1,14 @@
+---
+airgap:
+  enabled: true
+  artifacts_dir: "{{ playbook_dir | dirname }}/artifacts"
+
+metrics_server:
+  replicas: 2
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "200Mi"
+    limits:
+      cpu: "500m"
+      memory: "500Mi"
