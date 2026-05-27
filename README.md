@@ -8,20 +8,20 @@ This repository provides an automated, idempotent framework to deploy highly ava
 
 ## Features
 
-- **Air-gapped Support**: Fully offline deployment capability.
-- **Dynamic Topology**: Easily configurable node counts with standardized hostname templates.
-- **High Availability**: Optional VIP-based API Server HA using HAProxy and Keepalived.
-- **Modern Stack**: `containerd` as the container runtime, Calico CNI.
-- **Cluster Operations UX**: `k9s` is installed on master nodes for both `root` and `app_user`.
-- **Node Role Labels**: Master nodes are automatically labeled `control-plane` + `master`; worker nodes are labeled `worker`.
-- **Full Teardown**: A dedicated playbook to cleanly remove everything installed by `site.yml`.
-- **Production-Ready**: Built following enterprise best practices for Ansible and Kubernetes.
+- **Air-gapped Support**: Fully offline deployment (DEB packages + container images + binaries + HAProxy source build).
+- **Dynamic Topology**: Configurable master/worker counts and IP addresses with templated hostnames.
+- **High Availability**: HAProxy (built from source v3.2.0) + Keepalived VIP, port-split (VIP:8443 → masters:6443) to avoid collision on shared master nodes.
+- **Modern Stack**: `containerd` runtime, Calico CNI (VXLAN mode), metrics-server with 2 replicas + resource limits.
+- **CIS Hardening**: anonymous-auth disabled (CIS 1.2.1), API audit logging (CIS 1.2.18-22, 3.2.1), kubelet serving cert rotation (CIS 4.2.12) — applied automatically as the last play. See [`docs/cis-compliance.md`](docs/cis-compliance.md) for the full mapping.
+- **Configurable Data Partition**: All filesystem-heavy paths (containerd, offline images, kubelet logs, audit logs) can be relocated to a custom partition (e.g. `/u01/app`) in one wizard prompt.
+- **Idempotent**: Re-runs are safe — playbooks detect stale state and self-heal (auto-reset+init on dead apiserver, dedupe app user rename, skip already-applied hardening patches).
+- **Cluster Operations UX**: `k9s` installed on every master for both `root` and the application user.
+- **Node Role Labels**: Masters auto-labeled `control-plane` + `master`; workers labeled `worker`.
+- **Full Teardown**: Dedicated playbook removes everything installed by `site.yml`.
 
 ## Prerequisites
 
-- Base OS: RHEL/AlmaLinux/Rocky or Ubuntu (Debian) family.
-- Ubuntu 24.04 is supported; offline package preparation uses `.deb` packages and APT-based installation.
-- On Ubuntu 24.04, the artifact download script can prepare Kubernetes `.deb` packages without requiring you to preconfigure the Kubernetes APT repo on the host.
+- **Ubuntu 24.04 LTS or newer ONLY** — no RPM/yum/dnf support.
 - Ansible installed on the control node.
 - SSH key-based authentication to all target nodes.
 - Offline artifacts downloaded (see [Airgap Preparation Guide](docs/airgap-guide.md)).
@@ -52,58 +52,46 @@ This repository provides an automated, idempotent framework to deploy highly ava
 
 ## Scripts
 
-### Main workflow
+Full reference (args, idempotency, env vars, output paths): [`docs/scripts.md`](docs/scripts.md).
 
-- `./bootstrap.sh`
-  - Interactively generates `inventories/inventory.ini` and `group_vars/*.yml`.
-  - Supports project/environment naming, optional hostname cluster number, node IP input, VIP settings, Kubernetes network settings, and optional custom storage partition paths for containerd and kubelet logs.
-- `./dry-run.sh`
-  - Previews the bootstrap result without modifying real files.
-  - Shows cluster summary, generated hostnames, server IPs, artifact download plan, file diffs, and Ansible syntax validation.
-- `./scripts/bootstrap-clean.sh`
-  - Restores the latest backup created by `bootstrap.sh`.
-  - Useful when you want to discard a bootstrap run and return to the previous generated state.
+| Script | Purpose |
+|---|---|
+| `./bootstrap.sh` | Interactive wizard — generates inventory + group_vars |
+| `./scripts/bootstrap-clean.sh` | Rolls bootstrap back to the latest snapshot |
+| `./scripts/generate-inventory.sh` | Generates inventory.ini from CLI args (called by `bootstrap.sh`) |
+| `./scripts/download-artifacts.sh` | Downloads every offline artifact (DEBs, binaries, HAProxy source build, images) |
+| `./scripts/load-images.sh` | Imports container image tarballs into containerd (run by Ansible) |
 
-### Artifact preparation
+### Recommended workflow
 
-- `./scripts/download-artifacts.sh`
-  - Downloads the full air-gap bundle.
-  - Downloads installer binaries, offline OS packages, Calico manifests, and Kubernetes/Calico container images into `artifacts/`.
-  - Includes `k9s` in the binary bundle so master nodes can inspect the cluster locally with `root` and `app_user`.
-  - Container images are pulled for `linux/amd64` to match the target cluster nodes and avoid multi-arch import issues in `containerd`.
-  - This is the only artifact preparation command you need to run on the internet-connected machine.
-- `./scripts/load-images.sh`
-  - Loads offline image tar files into `containerd`.
-  - This script is copied and executed by Ansible on target nodes during deployment.
-
-### Inventory helper
-
-- `./scripts/generate-inventory.sh`
-  - Helper script used by `bootstrap.sh` to generate `inventories/inventory.ini`.
-  - You usually do not need to run it manually unless you want to automate inventory generation yourself.
-
-### Recommended usage order
-
-1. `./dry-run.sh`
-2. `./bootstrap.sh`
-3. `./scripts/download-artifacts.sh`
-4. `ansible-playbook playbooks/site.yml`
-
-To undo the latest bootstrap-generated config:
 ```bash
-./scripts/bootstrap-clean.sh
+# 1. On the build machine (with internet, Ubuntu 24.04+):
+./scripts/download-artifacts.sh
+
+# 2. Copy the repo + artifacts to the airgap control node, then:
+./bootstrap.sh
+ansible-playbook playbooks/site.yml
 ```
 
-To tear down the entire cluster and all installed components:
+### Cleanup
+
 ```bash
+# Roll back bootstrap (config only — does not touch the cluster):
+./scripts/bootstrap-clean.sh
+
+# Tear down the cluster:
 ansible-playbook playbooks/teardown.yml
+ansible-playbook playbooks/teardown.yml -e remove_app_user=true   # also removes the app user
 ```
 
 ## Documentation
 
-- [Quick Start Guide](docs/quickstart.md)
+- [Quick Start Guide](docs/quickstart.md) — fast walkthrough
+- [Scripts Reference](docs/scripts.md) — per-script details
+- [Features Reference](docs/features.md) — every feature and fix
+- [CIS Compliance](docs/cis-compliance.md) — CIS Kubernetes Benchmark mapping
 - [Airgap Preparation Guide](docs/airgap-guide.md)
-- [High Availability Architecture Guide](docs/ha-architecture.md)
+- [HA Architecture Guide](docs/ha-architecture.md)
 
 ## Structure
 

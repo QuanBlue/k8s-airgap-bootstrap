@@ -1,59 +1,95 @@
 # Airgap Preparation Guide
 
-Deploying a Kubernetes cluster in a completely offline (air-gapped) environment requires careful preparation of all necessary dependencies, including packages, binaries, and container images.
+Deploying a Kubernetes cluster in a completely offline (air-gapped) environment requires pre-downloading every dependency on an internet-connected build machine. **Both the build machine and the target nodes must run Ubuntu 24.04 LTS or newer** — this repo dropped RPM/yum support.
 
-## Overview of Offline Artifacts
+## Overview of offline artifacts
 
-To successfully install the cluster, the following artifacts must be pre-downloaded and transferred to the offline environment:
+| Kind | Location in the repo | Contents |
+|---|---|---|
+| OS DEB packages | `artifacts/packages/*.deb` | kubeadm, kubelet, kubectl, kubernetes-cni, keepalived, socat, conntrack, ipset, ipvsadm + transitive deps (libipset13, libnl-*, libnfnetlink0) |
+| Pre-built binaries | `artifacts/bin/` | `containerd-<ver>-linux-amd64.tar.gz`, `runc.amd64`, `crictl-<ver>-linux-amd64.tar.gz`, `helm`, `k9s`, `kubeadm`, `kubelet`, `kubectl` |
+| HAProxy compiled binary | `artifacts/bin/haproxy-<ver>.tar.gz` | Source from haproxy.org, compiled with OpenSSL, PCRE2 JIT, zlib, systemd |
+| Container images | `artifacts/images/*.tar` | Every Kubernetes control-plane image, Calico images, the metrics-server image |
+| Manifests | `artifacts/manifests/` | `calico.yaml`, `metrics-server.yaml`, `installers-manifest.txt` (version summary) |
 
-1. **OS Packages (RPM/DEB):** containerd, kubeadm, kubelet, kubectl, keepalived, haproxy.
-2. **Container Images:** Kubernetes control plane images (API server, controller manager, scheduler, proxy, pause, etcd, coredns), Calico images, and other optional components (ingress-nginx, metallb).
-3. **Binaries:** Helm, crictl, nerdctl.
-4. **Manifests:** Calico CNI manifests.
+## Step 1: Download artifacts on the build machine
 
-## Step 1: Downloading Artifacts (Internet-Connected Machine)
-
-We provide a helper script to automate the download process. Run it on a machine that has internet access and the same OS family as your target nodes.
-
-For Ubuntu 24.04, the script is expected to run on an Ubuntu-based machine with internet access. It uses an isolated APT source set for Ubuntu packages and automatically adds the Kubernetes `pkgs.k8s.io` repository for the target Kubernetes minor version, so unrelated broken PPAs on the host do not block artifact preparation.
+Requirements:
+- Ubuntu 24.04+
+- Internet access
+- `gcc`, `make` for the HAProxy build — the script auto-installs them via `sudo apt-get` (when running as root or with sudo)
 
 ```bash
+# Download everything
+./scripts/download-artifacts.sh
+
+# Or run individual steps (see help)
+./scripts/download-artifacts.sh --help
+./scripts/download-artifacts.sh binaries haproxy deb manifests images manifest
+```
+
+What the script does:
+- Verifies the host OS is Ubuntu 24.04+ (fails fast otherwise)
+- Sets up isolated APT sources (Ubuntu official + Kubernetes `pkgs.k8s.io`) — broken third-party PPAs on the host do not affect the build
+- Uses `apt-get install --download-only --reinstall` so transitive deps are force-downloaded (avoiding the "already on the build host, so skipped" trap)
+- Compiles HAProxy from source (full feature flags) and packages the binary as a tarball
+- Pulls container images via `ctr` (if available) or `docker`, saves to tar
+- Verifies tar integrity after saving (up to 3 retries)
+- Skips steps whose output already exists (re-runs are safe)
+
+Override versions via env vars:
+```bash
+K8S_VERSION=1.36.0 \
+CALICO_VERSION=v3.32.0 \
+HAPROXY_VERSION=3.2.0 \
+METRICS_SERVER_VERSION=v0.8.1 \
 ./scripts/download-artifacts.sh
 ```
 
-### What the script does:
-- Downloads installer binaries used directly by Ansible into `artifacts/bin/` such as `containerd` 2.3.1, `runc` 1.4.0, `crictl` v1.36.0, `helm` v3.20.1, `kubeadm`, `kubelet`, and `kubectl`.
-- Downloads offline OS packages into `artifacts/packages/` for components that still require package-managed dependencies or systemd integration.
-- Creates an `artifacts/` directory.
-- Uses the host package manager to download required system packages.
-- On Ubuntu 24.04, downloads offline `.deb` packages using `apt-get`.
-- Uses `docker pull --platform linux/amd64` to download required container images for the target cluster architecture.
-- Uses `docker save` or `ctr image export` to package images into `.tar` files.
-- Downloads required binaries and manifests via `curl` or `wget`.
+Full args / env / output reference: [`scripts.md`](./scripts.md).
 
-## Step 2: Transfer Artifacts
-
-Once the download script completes, package the repository and the `artifacts/` folder:
+## Step 2: Transfer artifacts to the airgap control node
 
 ```bash
-tar -czvf k8s-airgap-bundle.tar.gz ansible-airgap-k8s/
+tar -czvf k8s-airgap-bundle.tar.gz k8s-airgap-bootstrap/
 ```
 
-Transfer `k8s-airgap-bundle.tar.gz` to your offline Ansible control node using a secure method (e.g., USB drive, secure file transfer gateway).
+Move the archive over a USB drive, secure file-transfer gateway, or a private network to the control node.
 
-## Step 3: Loading Artifacts (Offline Machine)
+## Step 3: On the airgap control node
 
-Extract the bundle on your offline Ansible control node:
+Requirements:
+- Ubuntu 24.04+
+- SSH key-based access to every master and worker
+- Ansible installed (`apt-get install -y ansible` from an ISO or local mirror if fully offline)
 
 ```bash
 tar -xzvf k8s-airgap-bundle.tar.gz
-cd ansible-airgap-k8s
+cd k8s-airgap-bootstrap
+
+# Generate inventory + group_vars
+./bootstrap.sh
+
+# Deploy
+ansible-playbook playbooks/site.yml
 ```
 
-The Ansible playbooks will automatically handle the installation of local binaries, packages, and the loading of container images onto the target nodes. 
+The `containerd` role automatically copies `scripts/load-images.sh` and the entire `artifacts/images/` directory to every node, then runs the script to `ctr -n k8s.io images import` every tar before `kubeadm init` / `join`.
 
-Specifically, the `roles/containerd` role uses the `scripts/load-images.sh` script (executed remotely) to import the `.tar` image files into the containerd runtime before `kubeadm init` or `kubeadm join` is run.
+## Troubleshooting
 
+### Image load fails (corrupt tar)
+Re-pull the specific image on the build machine and retry:
 ```bash
-ansible-playbook -i inventories/inventory.ini playbooks/site.yml
+rm artifacts/images/<bad-image>.tar
+./scripts/download-artifacts.sh images
+```
+
+### DEB dependency conflict (ipset, libipset13)
+The build machine already has the lib installed → `--download-only` skips it. Fixed by passing `--reinstall` and listing the transitive libs explicitly. If something else is still missing, add the package name to `download_deb_packages()`.
+
+### HAProxy build fails
+Missing dev libs. The script auto-installs them, but if the build host is locked down:
+```bash
+sudo apt-get install -y build-essential pkg-config libssl-dev libpcre2-dev zlib1g-dev libsystemd-dev
 ```
