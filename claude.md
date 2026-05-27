@@ -446,6 +446,17 @@ Generate:
 
 ---
 
+# Target OS
+
+**Ubuntu 24.04 LTS or newer ONLY.**
+
+- Do NOT write RPM, yum, dnf, or any RedHat/CentOS/AlmaLinux/Rocky code
+- All package installation uses `dpkg -i` (offline .deb) or `apt-get`
+- All OS-level checks assume Debian/Ubuntu conventions
+- `ansible_os_family == "Debian"` is always assumed — do not add `when: ansible_os_family == "RedHat"` branches
+
+---
+
 # Important Instructions
 
 This repository must resemble a real enterprise DevOps platform engineering project.
