@@ -1,18 +1,22 @@
 ---
-- name: Install keepalived and dependencies from offline DEB packages
-  shell: >
-    DEBIAN_FRONTEND=noninteractive dpkg -i
-    /tmp/k8s-packages/keepalived*.deb
-    /tmp/k8s-packages/socat*.deb
-    /tmp/k8s-packages/conntrack*.deb
-    /tmp/k8s-packages/ipset*.deb
-    /tmp/k8s-packages/ipvsadm*.deb
+- name: Stage offline DEB packages into apt cache
+  shell: cp /tmp/k8s-packages/*.deb /var/cache/apt/archives/ 2>/dev/null || true
   when: airgap.enabled | bool
-  register: keepalived_install
-  failed_when:
-    - keepalived_install.rc != 0
-    - "'already installed' not in keepalived_install.stderr"
-    - "'is already installed' not in keepalived_install.stdout"
+  changed_when: false
+
+- name: Install keepalived and HA dependencies via apt (resolves from local cache)
+  apt:
+    name:
+      - keepalived
+      - socat
+      - conntrack
+      - ipset
+      - ipvsadm
+    state: present
+    update_cache: no
+  when: airgap.enabled | bool
+  environment:
+    DEBIAN_FRONTEND: noninteractive
 
 - name: Ensure keepalived config directory exists
   file:

@@ -1,24 +1,127 @@
 ---
-- name: Install HAProxy from offline DEB package
-  shell: DEBIAN_FRONTEND=noninteractive dpkg -i /tmp/k8s-packages/haproxy*.deb
+- name: Resolve HAProxy tarball on control node
+  set_fact:
+    haproxy_archive_src: "{{ lookup('ansible.builtin.fileglob', airgap.artifacts_dir ~ '/bin/haproxy-*.tar.gz', wantlist=True) | first | default('') }}"
   when: airgap.enabled | bool
-  register: haproxy_install
-  failed_when:
-    - haproxy_install.rc != 0
-    - "'already installed' not in haproxy_install.stderr"
-    - "'is already installed' not in haproxy_install.stdout"
 
-- name: Ensure HAProxy config directory exists
+- name: Fail when HAProxy tarball is missing
+  fail:
+    msg: >-
+      HAProxy tarball not found. Place a pre-built binary tarball at
+      {{ airgap.artifacts_dir }}/bin/haproxy-*.tar.gz (must contain the
+      'haproxy' binary somewhere inside).
+  when:
+    - airgap.enabled | bool
+    - haproxy_archive_src | length == 0
+
+- name: Ensure haproxy group exists
+  group:
+    name: haproxy
+    system: yes
+
+- name: Ensure haproxy user exists
+  user:
+    name: haproxy
+    group: haproxy
+    system: yes
+    shell: /usr/sbin/nologin
+    home: /var/lib/haproxy
+    create_home: yes
+
+- name: Ensure HAProxy directories exist
   file:
-    path: /etc/haproxy
+    path: "{{ item }}"
     state: directory
     mode: '0755'
+  loop:
+    - /etc/haproxy
+    - /var/lib/haproxy
+    - /run/haproxy
+
+- name: Create HAProxy extract staging directory
+  file:
+    path: /tmp/haproxy-extract
+    state: directory
+    mode: '0755'
+
+- name: Extract HAProxy tarball on node
+  unarchive:
+    src: "{{ haproxy_archive_src }}"
+    dest: /tmp/haproxy-extract
+  when: airgap.enabled | bool
+
+- name: Locate haproxy binary inside extracted tarball
+  find:
+    paths: /tmp/haproxy-extract
+    patterns: 'haproxy'
+    file_type: file
+    recurse: yes
+  register: haproxy_binary_found
+  when: airgap.enabled | bool
+
+- name: Fail when haproxy binary not found inside tarball
+  fail:
+    msg: >-
+      No 'haproxy' executable found inside the extracted tarball.
+      Verify the tarball at {{ haproxy_archive_src }} contains a haproxy binary.
+  when:
+    - airgap.enabled | bool
+    - haproxy_binary_found.files | length == 0
+
+- name: Install haproxy binary
+  copy:
+    src: "{{ haproxy_binary_found.files[0].path }}"
+    dest: /usr/local/sbin/haproxy
+    mode: '0755'
+    remote_src: yes
+  when:
+    - airgap.enabled | bool
+    - haproxy_binary_found.files | length > 0
+
+- name: Remove HAProxy extract staging directory
+  file:
+    path: /tmp/haproxy-extract
+    state: absent
+
+- name: Install HAProxy systemd unit
+  copy:
+    dest: /etc/systemd/system/haproxy.service
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=HAProxy Load Balancer
+      Documentation=man:haproxy(1)
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=notify
+      EnvironmentFile=-/etc/default/haproxy
+      ExecStartPre=/usr/local/sbin/haproxy -c -f /etc/haproxy/haproxy.cfg
+      ExecStart=/usr/local/sbin/haproxy -Ws -f /etc/haproxy/haproxy.cfg -p /run/haproxy.pid
+      ExecReload=/usr/local/sbin/haproxy -c -f /etc/haproxy/haproxy.cfg
+      ExecReload=/bin/kill -USR2 $MAINPID
+      KillMode=mixed
+      Restart=always
+      SuccessExitStatus=143
+      LimitNOFILE=65536
+
+      [Install]
+      WantedBy=multi-user.target
+  notify:
+    - reload systemd
+    - restart haproxy
+
+- name: Reload systemd to pick up haproxy unit
+  systemd:
+    daemon_reload: yes
 
 - name: Configure HAProxy
   template:
     src: haproxy.cfg.j2
     dest: /etc/haproxy/haproxy.cfg
     mode: '0644'
+    validate: '/usr/local/sbin/haproxy -c -f %s'
   notify: restart haproxy
 
 - name: Enable and start HAProxy

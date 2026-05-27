@@ -59,19 +59,36 @@
         enabled: false
       ignore_errors: true
 
-    - name: Remove HAProxy and Keepalived packages
-      shell: DEBIAN_FRONTEND=noninteractive apt-get remove -y --purge haproxy keepalived socat conntrack ipset ipvsadm 2>/dev/null || true
+    - name: Remove Keepalived and related packages
+      shell: DEBIAN_FRONTEND=noninteractive apt-get remove -y --purge keepalived socat conntrack ipset ipvsadm 2>/dev/null || true
       changed_when: false
 
-    - name: Remove HAProxy config
+    - name: Remove HAProxy binary, systemd unit, and directories
       file:
-        path: /etc/haproxy
+        path: "{{ item }}"
         state: absent
+      loop:
+        - /usr/local/sbin/haproxy
+        - /etc/systemd/system/haproxy.service
+        - /etc/haproxy
+        - /var/lib/haproxy
+        - /run/haproxy
+
+    - name: Remove haproxy system user
+      user:
+        name: haproxy
+        state: absent
+        remove: true
+      ignore_errors: true
 
     - name: Remove Keepalived config
       file:
         path: /etc/keepalived
         state: absent
+
+    - name: Reload systemd after removing haproxy unit
+      systemd:
+        daemon_reload: true
 
 # ── 3. Remove k9s from masters ────────────────────────────────────────────────
 - name: Remove k9s from master nodes

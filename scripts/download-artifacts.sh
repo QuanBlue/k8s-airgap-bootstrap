@@ -16,6 +16,7 @@ RUNC_VERSION="${RUNC_VERSION:-1.4.0}"
 CRICTL_VERSION="${CRICTL_VERSION:-v1.36.0}"
 HELM_VERSION="${HELM_VERSION:-3.20.1}"
 K9S_VERSION="${K9S_VERSION:-v0.50.18}"
+HAPROXY_VERSION="${HAPROXY_VERSION:-3.2.0}"
 IMAGE_PLATFORM="${IMAGE_PLATFORM:-linux/amd64}"
 
 mkdir -p "$BIN_DIR" "$PKGS_DIR" "$IMAGES_DIR" "$MANIFESTS_DIR"
@@ -89,46 +90,33 @@ download_binary_bundle() {
     chmod 0755 "$BIN_DIR/kubectl"
 }
 
-download_rpm_packages() {
-    local downloader=""
+require_ubuntu_24_04_or_newer() {
+    local id="" version_id="" major=""
 
-    if command -v yumdownloader >/dev/null 2>&1; then
-        downloader="yumdownloader"
-    elif command -v dnf >/dev/null 2>&1; then
-        downloader="dnf download"
-    else
-        log "Skipping RPM packages because neither yumdownloader nor dnf is available."
-        return 0
+    if [[ ! -r /etc/os-release ]]; then
+        log "ERROR: /etc/os-release not found — this script only supports Ubuntu 24.04+."
+        exit 1
     fi
 
-    log "Downloading offline RPM packages into $PKGS_DIR"
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    id="${ID:-}"
+    version_id="${VERSION_ID:-}"
 
-    if [[ "$downloader" == "yumdownloader" ]]; then
-        yumdownloader --resolve --destdir "$PKGS_DIR" \
-            containerd.io \
-            kubeadm \
-            kubelet \
-            kubectl \
-            kubernetes-cni \
-            haproxy \
-            keepalived \
-            socat \
-            conntrack-tools \
-            ipset \
-            ipvsadm
-    else
-        dnf download --resolve --alldeps --destdir "$PKGS_DIR" \
-            containerd.io \
-            kubeadm \
-            kubelet \
-            kubectl \
-            kubernetes-cni \
-            haproxy \
-            keepalived \
-            socat \
-            conntrack-tools \
-            ipset \
-            ipvsadm
+    if [[ "$id" != "ubuntu" ]]; then
+        log "ERROR: detected '${id}' but only Ubuntu is supported."
+        exit 1
+    fi
+
+    major="${version_id%%.*}"
+    if [[ -z "$major" || "$major" -lt 24 ]]; then
+        log "ERROR: detected Ubuntu ${version_id} but 24.04 or newer is required."
+        exit 1
+    fi
+
+    if ! command -v apt-get >/dev/null 2>&1; then
+        log "ERROR: apt-get not found — cannot download DEB packages."
+        exit 1
     fi
 }
 
@@ -142,20 +130,13 @@ download_deb_packages() {
     local k8s_minor_version=""
     local os_codename=""
 
-    if ! command -v apt-get >/dev/null 2>&1; then
-        log "Skipping DEB packages because apt-get is not available."
-        return 0
-    fi
-
-    if [[ -r /etc/os-release ]]; then
-        # shellcheck disable=SC1091
-        . /etc/os-release
-        os_codename="${VERSION_CODENAME:-}"
-    fi
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    os_codename="${VERSION_CODENAME:-}"
 
     if [[ -z "$os_codename" ]]; then
-        log "Unable to detect Ubuntu codename from /etc/os-release."
-        return 1
+        log "ERROR: Unable to detect Ubuntu codename from /etc/os-release."
+        exit 1
     fi
 
     mkdir -p "$apt_lists_dir/partial" "$apt_sources_dir" "$apt_partial_dir"
@@ -192,17 +173,116 @@ EOF
         -o Dir::Etc::sourceparts="$apt_sources_dir" \
         -o Dir::State::lists="$apt_lists_dir" \
         -o Dir::Cache::archives="$apt_cache_dir" \
-        install --download-only -y \
+        install --download-only -y --reinstall \
         kubeadm \
         kubelet \
         kubectl \
         kubernetes-cni \
-        haproxy \
         keepalived \
         socat \
         conntrack \
         ipset \
-        ipvsadm
+        ipvsadm \
+        libipset13 \
+        libnfnetlink0 \
+        libnl-3-200 \
+        libnl-genl-3-200
+    # HAProxy is installed from a pre-built binary tarball at
+    # $BIN_DIR/haproxy-*.tar.gz — provide it manually (the role expects a
+    # tarball containing a 'haproxy' executable somewhere inside).
+    # --reinstall forces apt to re-download packages even if they're already
+    # installed on the build machine, ensuring transitive deps are captured.
+}
+
+build_haproxy_tarball() {
+    local haproxy_major="${HAPROXY_VERSION%.*}"
+    local src_tar="$TMP_DIR/haproxy-${HAPROXY_VERSION}.tar.gz"
+    local src_dir="$TMP_DIR/haproxy-${HAPROXY_VERSION}"
+    local pkg_dir="$TMP_DIR/haproxy-${HAPROXY_VERSION}-pkg"
+    local out_tar="$BIN_DIR/haproxy-${HAPROXY_VERSION}.tar.gz"
+    local missing=()
+    local pkg=""
+
+    if [[ -f "$out_tar" ]]; then
+        log "HAProxy tarball already exists: $(basename "$out_tar")"
+        return 0
+    fi
+
+    local -a missing_apt=()
+
+    # Tools check
+    command -v gcc >/dev/null 2>&1        || missing_apt+=(build-essential)
+    command -v make >/dev/null 2>&1       || missing_apt+=(build-essential)
+    command -v pkg-config >/dev/null 2>&1 || missing_apt+=(pkg-config)
+
+    # Dev libs check via pkg-config
+    if command -v pkg-config >/dev/null 2>&1; then
+        pkg-config --exists openssl     2>/dev/null || missing_apt+=(libssl-dev)
+        pkg-config --exists libpcre2-8  2>/dev/null || missing_apt+=(libpcre2-dev)
+        pkg-config --exists zlib        2>/dev/null || missing_apt+=(zlib1g-dev)
+        pkg-config --exists libsystemd  2>/dev/null || missing_apt+=(libsystemd-dev)
+    else
+        # pkg-config itself missing — schedule all dev libs too
+        missing_apt+=(libssl-dev libpcre2-dev zlib1g-dev libsystemd-dev)
+    fi
+
+    if [[ ${#missing_apt[@]} -gt 0 ]]; then
+        # Dedupe
+        local -A seen=()
+        local -a uniq=()
+        for pkg in "${missing_apt[@]}"; do
+            if [[ -z "${seen[$pkg]:-}" ]]; then
+                seen[$pkg]=1
+                uniq+=("$pkg")
+            fi
+        done
+
+        log "Installing missing build deps: ${uniq[*]}"
+        local sudo_cmd=""
+        if [[ $EUID -ne 0 ]]; then
+            if ! command -v sudo >/dev/null 2>&1; then
+                log "ERROR: not root and sudo not available. Install manually: apt-get install -y ${uniq[*]}"
+                exit 1
+            fi
+            sudo_cmd="sudo"
+        fi
+
+        # apt-get update may fail due to broken third-party PPAs — don't abort,
+        # the packages we need are in Ubuntu's main repos and may already be
+        # cached locally.
+        $sudo_cmd apt-get update -qq || log "WARN: apt-get update had errors (likely a broken PPA) — continuing."
+        $sudo_cmd env DEBIAN_FRONTEND=noninteractive apt-get install -y "${uniq[@]}"
+    fi
+
+    log "Downloading HAProxy ${HAPROXY_VERSION} source"
+    download_file \
+        "https://www.haproxy.org/download/${haproxy_major}/src/haproxy-${HAPROXY_VERSION}.tar.gz" \
+        "$src_tar"
+
+    log "Extracting HAProxy source"
+    tar -xzf "$src_tar" -C "$TMP_DIR"
+
+    log "Building HAProxy ${HAPROXY_VERSION} (full: OpenSSL + PCRE2 JIT + zlib + systemd)"
+    (
+        cd "$src_dir"
+        make -j"$(nproc)" \
+            TARGET=linux-glibc \
+            USE_OPENSSL=1 \
+            USE_PCRE2=1 \
+            USE_PCRE2_JIT=1 \
+            USE_ZLIB=1 \
+            USE_SYSTEMD=1 \
+            USE_LINUX_TPROXY=1 \
+            USE_GETADDRINFO=1 \
+            USE_TFO=1 \
+            >/dev/null
+    )
+
+    log "Packaging HAProxy binary into $(basename "$out_tar")"
+    mkdir -p "$pkg_dir"
+    cp "$src_dir/haproxy" "$pkg_dir/haproxy"
+    chmod 0755 "$pkg_dir/haproxy"
+    tar -czf "$out_tar" -C "$TMP_DIR" "$(basename "$pkg_dir")"
 }
 
 download_manifests() {
@@ -281,6 +361,7 @@ write_manifest() {
         echo "CRICTL_VERSION=$CRICTL_VERSION"
         echo "HELM_VERSION=$HELM_VERSION"
         echo "K9S_VERSION=$K9S_VERSION"
+        echo "HAPROXY_VERSION=$HAPROXY_VERSION"
         echo "IMAGE_PLATFORM=$IMAGE_PLATFORM"
         echo
         echo "[bin]"
@@ -297,16 +378,53 @@ write_manifest() {
     } > "$MANIFEST_FILE"
 }
 
-log "Preparing full air-gap bundle in $ARTIFACTS_DIR"
-download_binary_bundle
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [STEP ...]
 
-if command -v apt-get >/dev/null 2>&1; then
+Run individual steps (default: run all):
+  binaries   Download k8s/containerd/runc/crictl/helm/k9s binaries
+  haproxy    Download HAProxy source and build binary tarball
+  deb        Download offline DEB packages (kubeadm, keepalived, ...)
+  manifests  Download Calico/etc. YAML manifests
+  images     Pull and save container images
+  manifest   Write installers-manifest.txt summary
+
+Examples:
+  $(basename "$0")                # run everything
+  $(basename "$0") haproxy        # only build HAProxy
+  $(basename "$0") haproxy deb    # HAProxy + DEB packages
+EOF
+}
+
+run_step() {
+    case "$1" in
+        binaries)  download_binary_bundle ;;
+        haproxy)   build_haproxy_tarball ;;
+        deb)       download_deb_packages ;;
+        manifests) download_manifests ;;
+        images)    download_container_images ;;
+        manifest)  write_manifest ;;
+        -h|--help) usage; exit 0 ;;
+        *)         log "ERROR: unknown step '$1'"; usage; exit 1 ;;
+    esac
+}
+
+require_ubuntu_24_04_or_newer
+
+if [[ $# -eq 0 ]]; then
+    log "Preparing full air-gap bundle in $ARTIFACTS_DIR"
+    download_binary_bundle
+    build_haproxy_tarball
     download_deb_packages
+    download_manifests
+    download_container_images
+    write_manifest
+    log "Artifact bundle is ready. Manifest: $MANIFEST_FILE"
 else
-    download_rpm_packages
+    log "Running selected steps: $*"
+    for step in "$@"; do
+        run_step "$step"
+    done
+    log "Selected steps complete."
 fi
-
-download_manifests
-download_container_images
-write_manifest
-log "Artifact bundle is ready. Manifest: $MANIFEST_FILE"

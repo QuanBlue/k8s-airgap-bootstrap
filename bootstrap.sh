@@ -339,7 +339,7 @@ k8s_ha:
   enabled: $VIP_ENABLED
   vip_address: "$VIP_ADDRESS"
   vip_interface: "$VIP_INTERFACE"
-  vip_port: 6443
+  vip_port: 8443
 
 # Calico CNI
 calico_networking_backend: vxlan

@@ -18,13 +18,13 @@ defaults
     timeout client  50000
     timeout server  50000
 
-frontend kube-apiserver
+frontend kube-apiserver_frontend
     bind *:{{ k8s_ha.vip_port }}
     mode tcp
     option tcplog
-    default_backend kube-apiserver
+    default_backend kube-apiserver_backend
 
-backend kube-apiserver
+backend kube-apiserver_backend
     mode tcp
     option tcp-check
     balance roundrobin
