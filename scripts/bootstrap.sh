@@ -23,19 +23,17 @@ _TOTAL=5  # reduced to 4 if single master (no HA section)
 
 # ─── CLI ──────────────────────────────────────────────────────────────────────
 usage() {
-    cat <<EOF
-Usage: ./scripts/bootstrap.sh [--rollback]
-
-  (no args)      Run the interactive wizard. Generates inventories/inventory.ini
-                 and inventories/group_vars/{all,masters,workers}.yml.
-                 The previous versions of those files are snapshotted into
-                 .bootstrap-backups/<timestamp>/ before being overwritten.
-
-  --rollback     Restore the latest snapshot (undoes the most recent wizard
-                 run). No prompts. Does not touch any cluster state.
-
-  -h, --help     Show this help.
-EOF
+    echo -e "${BOLD}usage:${NC} ${CYAN}bootstrap.sh${NC} [${GREEN}-h${NC}] [${GREEN}--rollback${NC}]"
+    echo
+    echo "Interactive wizard that generates Ansible inventory and group_vars for the airgap"
+    echo "Kubernetes cluster. Previous versions of generated files are snapshotted to"
+    echo -e "${DIM}.bootstrap-backups/<timestamp>/${NC} before being overwritten."
+    echo
+    echo -e "${BOLD}options:${NC}"
+    echo -e "  ${GREEN}-h${NC}, ${GREEN}--help${NC}            show this help message and exit"
+    echo -e "  ${GREEN}--rollback${NC}            restore the latest snapshot, undoing the most recent"
+    echo -e "                        wizard run; no prompts and does not touch any cluster"
+    echo -e "                        state"
 }
 
 MODE="wizard"

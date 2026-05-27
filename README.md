@@ -1,5 +1,5 @@
 <h1 align="center">
-  <img src="./assets/favicon.png" alt="icon" width="200"></img>
+  <img src="./assets/favicon.png" alt="icon" width="200" style="border-radius: 30px;"></img>
   <br>
   <b>ansible-airgap-k8s</b>
 </h1>
@@ -38,22 +38,6 @@
 </p>
 
 <br/>
-
-<div align="center">
-  <div>
-    <img src="./assets/bootstrap-demo.gif" height="350" alt="bootstrap wizard demo"/>
-    <div>
-      <i>Interactive bootstrap wizard</i>
-    </div>
-  </div>
-  <br/>
-  <div >
-    <img src="./assets/cluster-demo.png" height="450" alt="cluster up demo"/>
-    <div>
-      <i>HA cluster ready with kube-apiserver hardened</i>
-    </div>
-  </div>
-</div>
 
 <details open>
 <summary><b>📖 Table of Contents</b></summary>
@@ -99,21 +83,58 @@ See it in action:
 
 # :building_construction: Architecture
 
+<p align="center">
+  <img src="./assets/architect.png" alt="architecture diagram" width="800"/>
+</p>
+
+### Layers
+
+- **Control node** — runs Ansible, owns the offline `artifacts/` bundle, and pushes everything to the cluster nodes over SSH. Never part of the cluster itself.
+- **Master nodes** (`>= 3` recommended) — each one stacks the full control plane (kube-apiserver + controller-manager + scheduler + etcd) **plus** HAProxy and Keepalived. No dedicated load-balancer hosts needed.
+- **Worker nodes** — kubelet + kube-proxy + Calico CNI pod. Pure data plane.
+
+### Control-plane traffic flow
+
+```mermaid
+flowchart TD
+    Client["<b>Client</b><br/>kubectl · kubeadm join · CM · scheduler · addon controllers"]
+    VIP["<b>Keepalived VIP</b><br/>one master holds it at a time (VRRP)"]
+    HAfe["<b>HAProxy frontend</b> · <code>*:8443</code><br/>kube-apiserver_frontend"]
+    HAbe(["<b>HAProxy backend</b> · TCP round-robin<br/>kube-apiserver_backend"])
+
+    M1["<b>master-01</b><br/>kube-apiserver :6443"]
+    M2["<b>master-02</b><br/>kube-apiserver :6443"]
+    M3["<b>master-03</b><br/>kube-apiserver :6443"]
+
+    E1[("etcd<br/>127.0.0.1:2379")]
+    E2[("etcd<br/>127.0.0.1:2379")]
+    E3[("etcd<br/>127.0.0.1:2379")]
+
+    Client -- "https://&lt;VIP&gt;:8443" --> VIP
+    VIP --> HAfe --> HAbe
+    HAbe --> M1
+    HAbe --> M2
+    HAbe --> M3
+    M1 --> E1
+    M2 --> E2
+    M3 --> E3
 ```
-            ┌──────────────────────────────────────────┐
- Clients →  │       VIP:8443 (Keepalived MASTER)       │
-            │              │                           │
-            │              ▼  HAProxy on each master   │
-            │   ┌─────────────────────────────────┐    │
-            │   │  master-01  │ master-02  │ ...  │    │
-            │   │  apiserver  │ apiserver  │      │    │
-            │   │   :6443     │   :6443    │      │    │
-            │   └─────────────────────────────────┘    │
-            │              │                           │
-            │              ▼                           │
-            │           etcd cluster                   │
-            └──────────────────────────────────────────┘
-```
+
+**Why the port split (`8443` external vs `6443` internal):** if HAProxy and the apiserver both tried to bind `:6443` on the same master, they would collide. Putting HAProxy in front on `:8443` lets the two coexist on every master. `kubeadm`'s `controlPlaneEndpoint` is set to `<VIP>:8443`, while each apiserver still listens on `:6443` — the path is transparent to clients.
+
+**Failover:** Keepalived runs VRRP between masters. When the VIP holder dies, a `BACKUP` master takes the VIP within ~3 seconds. HAProxy backend checks (`inter 2s rise 1 fall 2`, no slowstart) re-mark unhealthy backends quickly so traffic keeps flowing as soon as the new VIP holder is up.
+
+### Bootstrap pipeline
+
+`ansible-playbook playbooks/site.yml` runs five plays in order:
+
+1. **prepare** — OS hygiene on every node (swap off, kernel modules, sysctl, hostnames, `/etc/hosts`, app user) + containerd install + offline image load.
+2. **ha** — installs HAProxy (from-source binary) + Keepalived on every master. HAProxy starts up with all backends DOWN at this point; that's expected.
+3. **kubernetes** — `kubeadm init` on `masters[0]`, then `kubeadm join --control-plane` on the other masters, then `kubeadm join` on workers. Each master also renders an `admin-local.conf` pointing at its own IP so bootstrap admin commands bypass the still-warming VIP.
+4. **addons** (delegated to `masters[0]`) — Calico CNI patched to VXLAN, metrics-server scaled to 2 replicas with limits.
+5. **hardening** (serial: 1 across masters) — flips `--anonymous-auth=false`, converts the apiserver static-pod probes to `tcpSocket`, approves pending kubelet-serving CSRs. Rolling restart, so the API stays reachable through HAProxy the whole time.
+
+
 
 Details: [`docs/ha-architecture.md`](docs/ha-architecture.md).
 
