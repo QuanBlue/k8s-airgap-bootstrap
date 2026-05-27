@@ -15,5 +15,5 @@
   when: not kubelet_conf.stat.exists
 
 - name: Label worker node with worker role
-  command: kubectl label node {{ inventory_hostname | lower }} node-role.kubernetes.io/worker= --overwrite
+  command: kubectl --kubeconfig /etc/kubernetes/admin-local.conf label node {{ inventory_hostname | lower }} node-role.kubernetes.io/worker= --overwrite
   delegate_to: "{{ groups['masters'][0] }}"

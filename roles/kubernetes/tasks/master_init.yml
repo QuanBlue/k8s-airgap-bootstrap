@@ -4,6 +4,23 @@
     path: /etc/kubernetes/admin.conf
   register: kubeadm_admin_conf
 
+# admin.conf can exist from a previous (partial) run while apiserver is dead.
+# Probe the local apiserver to decide whether the cluster is REALLY healthy.
+- name: Probe local apiserver to detect stale state
+  uri:
+    url: "https://{{ hostvars[inventory_hostname]['ansible_host'] }}:6443/livez"
+    validate_certs: false
+    status_code: 200
+    timeout: 5
+  register: apiserver_probe
+  failed_when: false
+  changed_when: false
+  when: kubeadm_admin_conf.stat.exists
+
+- name: Set fact for cluster needing init
+  set_fact:
+    cluster_needs_init: "{{ (not kubeadm_admin_conf.stat.exists) or (apiserver_probe.status | default(-1) != 200) }}"
+
 - name: Create kubeadm config directory
   file:
     path: /etc/kubernetes/kubeadm
@@ -15,15 +32,15 @@
     dest: /etc/kubernetes/kubeadm/kubeadm-init.yaml
     force: yes
 
-- name: Reset any partial cluster state before init
+- name: Reset stale or partial cluster state before init
   command: kubeadm reset --force
-  when: not kubeadm_admin_conf.stat.exists
+  when: cluster_needs_init
   ignore_errors: true
   changed_when: false
 
 - name: Initialize Kubernetes cluster
   command: kubeadm init --config /etc/kubernetes/kubeadm/kubeadm-init.yaml --upload-certs
-  when: not kubeadm_admin_conf.stat.exists
+  when: cluster_needs_init
   register: kubeadm_init_output
 
 - name: Re-check cluster state after init
@@ -46,15 +63,44 @@
     mode: '0600'
   when: kubeadm_admin_conf_post.stat.exists
 
+# admin.conf points to the VIP (e.g. 10.0.6.99:8443). Right after kubeadm init,
+# HAProxy backends may still be marked DOWN (rise=2, slowstart=60s) which makes
+# any apiserver-bound command fail with rate-limit / context-deadline errors.
+# Use a local kubeconfig pointing straight at this master's apiserver IP for
+# all bootstrap admin tasks. The cert SAN already includes the master IP.
+- name: Render local-only kubeconfig that bypasses the VIP
+  shell: |
+    sed 's|server: https://.*|server: https://{{ hostvars[inventory_hostname]['ansible_host'] }}:6443|' \
+      /etc/kubernetes/admin.conf > /etc/kubernetes/admin-local.conf
+    chmod 0600 /etc/kubernetes/admin-local.conf
+  when: kubeadm_admin_conf_post.stat.exists
+  changed_when: false
+
+- name: Wait for local apiserver to be healthy
+  uri:
+    url: "https://{{ hostvars[inventory_hostname]['ansible_host'] }}:6443/livez"
+    validate_certs: false
+    status_code: 200
+  register: apiserver_local
+  until: apiserver_local.status == 200
+  retries: 30
+  delay: 2
+  when: kubeadm_admin_conf_post.stat.exists
+
 - name: Generate join command for masters
-  shell: kubeadm token create --print-join-command --certificate-key $(kubeadm init phase upload-certs --upload-certs | tail -n 1)
+  shell: |
+    set -euo pipefail
+    CERT_KEY=$(kubeadm init phase upload-certs --upload-certs --kubeconfig /etc/kubernetes/admin-local.conf | tail -n 1)
+    kubeadm token create --print-join-command --certificate-key "$CERT_KEY" --kubeconfig /etc/kubernetes/admin-local.conf
+  args:
+    executable: /bin/bash
   register: master_join_command
   when:
     - kubeadm_admin_conf_post.stat.exists
     - groups['masters'] | length > 1
 
 - name: Generate join command for workers
-  command: kubeadm token create --print-join-command
+  command: kubeadm token create --print-join-command --kubeconfig /etc/kubernetes/admin-local.conf
   register: worker_join_command
   when: kubeadm_admin_conf_post.stat.exists
 
@@ -74,5 +120,5 @@
   when: kubeadm_admin_conf_post.stat.exists
 
 - name: Label first master node with control-plane and master roles
-  command: kubectl label node {{ inventory_hostname | lower }} node-role.kubernetes.io/control-plane= node-role.kubernetes.io/master= --overwrite
+  command: kubectl --kubeconfig /etc/kubernetes/admin-local.conf label node {{ inventory_hostname | lower }} node-role.kubernetes.io/control-plane= node-role.kubernetes.io/master= --overwrite
   when: kubeadm_admin_conf_post.stat.exists

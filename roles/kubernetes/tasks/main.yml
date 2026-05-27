@@ -75,6 +75,35 @@
     mode: '0755'
   when: kubelet.pod_logs_dir | default('') | length > 0
 
+- name: Ensure kubelet systemd drop-in directory exists
+  file:
+    path: /etc/systemd/system/kubelet.service.d
+    state: directory
+    mode: '0755'
+
+# kubeadm DEB normally ships this drop-in, but we install kubeadm as a raw
+# binary from the airgap bundle. Without it, kubelet starts with no args and
+# never picks up its config / kubeconfig / CRI socket → no static pods spawn.
+- name: Install kubeadm systemd drop-in for kubelet
+  copy:
+    dest: /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
+    mode: '0644'
+    content: |
+      # Note: This dropin only works with kubeadm and kubelet v1.11+
+      [Service]
+      Environment="KUBELET_KUBECONFIG_ARGS=--bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf --kubeconfig=/etc/kubernetes/kubelet.conf"
+      Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml"
+      EnvironmentFile=-/var/lib/kubelet/kubeadm-flags.env
+      EnvironmentFile=-/etc/default/kubelet
+      ExecStart=
+      ExecStart=/usr/bin/kubelet $KUBELET_KUBECONFIG_ARGS $KUBELET_CONFIG_ARGS $KUBELET_KUBEADM_ARGS $KUBELET_EXTRA_ARGS
+  register: kubelet_dropin
+
+- name: Reload systemd when kubelet drop-in changed
+  systemd:
+    daemon_reload: true
+  when: kubelet_dropin.changed
+
 - name: Enable and start kubelet
   systemd:
     name: kubelet

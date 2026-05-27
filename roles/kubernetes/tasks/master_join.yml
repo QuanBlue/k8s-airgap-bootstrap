@@ -27,5 +27,22 @@
     remote_src: yes
     mode: '0600'
 
+- name: Render local-only kubeconfig that bypasses the VIP
+  shell: |
+    sed 's|server: https://.*|server: https://{{ hostvars[inventory_hostname]['ansible_host'] }}:6443|' \
+      /etc/kubernetes/admin.conf > /etc/kubernetes/admin-local.conf
+    chmod 0600 /etc/kubernetes/admin-local.conf
+  changed_when: false
+
+- name: Wait for local apiserver to be healthy
+  uri:
+    url: "https://{{ hostvars[inventory_hostname]['ansible_host'] }}:6443/livez"
+    validate_certs: false
+    status_code: 200
+  register: apiserver_local
+  until: apiserver_local.status == 200
+  retries: 30
+  delay: 2
+
 - name: Label master node with control-plane and master roles
-  command: kubectl label node {{ inventory_hostname | lower }} node-role.kubernetes.io/control-plane= node-role.kubernetes.io/master= --overwrite
+  command: kubectl --kubeconfig /etc/kubernetes/admin-local.conf label node {{ inventory_hostname | lower }} node-role.kubernetes.io/control-plane= node-role.kubernetes.io/master= --overwrite
