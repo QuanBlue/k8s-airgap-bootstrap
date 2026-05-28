@@ -1,0 +1,14 @@
+---
+# Cài script backup (etcd + k8s config) và đặt lịch cron 23:55.
+# Chạy sau khi cluster đã lên (etcd certs đã tồn tại trên master).
+
+- name: Configure cluster backups
+  hosts: all
+  become: true
+  module_defaults:
+    ansible.builtin.gather_facts:
+      gather_timeout: 30
+  tags: ['backup']
+  roles:
+    - role: backup
+      when: backup.enabled | default(true)

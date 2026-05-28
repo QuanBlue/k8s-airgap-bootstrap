@@ -1,6 +1,6 @@
 ---
-cluster_name: "dms4-cluster"
-project_name: "dms4-cluster"
+cluster_name: "dms4-cluster1"
+project_name: "dms4-cluster1"
 project_short_name: "DMS4"
 environment_name: "Prod"
 app_user: "app_vietteldms"
@@ -50,3 +50,13 @@ kubernetes_audit:
   max_age: 90        # days
   max_backup: 20     # rotated files
   max_size: 100      # MB per file
+
+# Backup: etcd snapshot (masters) + k8s config (all nodes), cron lúc 23:55
+backup:
+  enabled: true
+  scripts_dir: "/u01/app/scripts"
+  dest_root: "/u01/app/backup"
+  retention_days: 90
+  schedule:
+    minute: 55
+    hour: 23

@@ -74,7 +74,8 @@ See it in action:
 - **Multi-master HA** — HAProxy (compiled from source v3.2.0) + Keepalived VIP, with a port-split design (VIP:8443 → masters:6443) so HAProxy and the apiserver coexist on the same master nodes.
 - **CIS-aligned hardening** — anonymous-auth disabled (1.2.1), TLS 1.2+ with a strong cipher list (1.2.14/1.2.15), full API audit logging (1.2.18-22, 3.2.1), kubelet serving cert rotation with auto-CSR-approval (4.2.12). Full mapping: [`docs/cis-compliance.md`](docs/cis-compliance.md).
 - **Modern stack** — containerd v2.3.1 runtime, Calico CNI in VXLAN mode, metrics-server v0.8.1 with 2 replicas + resource limits.
-- **Configurable data partition** — every filesystem-heavy path (containerd root, kubelet pod logs, audit logs, offline images) follows one wizard prompt.
+- **Configurable data partition** — every filesystem-heavy path (containerd root, kubelet pod logs, audit logs, offline images, backups) follows one wizard prompt.
+- **Automated backups** — daily cron at 23:55: etcd snapshot on every master (local member) + Kubernetes config archive (`/etc/kubernetes`, kubelet, kubeadm) on every node, both with 90-day rotation.
 - **Idempotent** — playbooks detect stale state and self-heal (auto-reset+init on a dead apiserver, rename-or-skip for app user, replace-without-duplicates for hardening patches).
 - **Interactive wizard** — `bootstrap.sh` walks through cluster identity, topology, IPs, VIP, network CIDRs, Calico autodetection, and data partition root — every prompt has a sensible default.
 - **Dynamic topology** — any master/worker count, IPs prompted per node, hostnames templated as `<Short>-<Env>[-Cluster<N>]-K8s-Master|Worker-NN`.
@@ -126,13 +127,14 @@ flowchart TD
 
 ### Bootstrap pipeline
 
-`ansible-playbook playbooks/site.yml` runs five plays in order:
+`ansible-playbook playbooks/site.yml` runs six plays in order:
 
 1. **prepare** — OS hygiene on every node (swap off, kernel modules, sysctl, hostnames, `/etc/hosts`, app user) + containerd install + offline image load.
 2. **ha** — installs HAProxy (from-source binary) + Keepalived on every master. HAProxy starts up with all backends DOWN at this point; that's expected.
 3. **kubernetes** — `kubeadm init` on `masters[0]`, then `kubeadm join --control-plane` on the other masters, then `kubeadm join` on workers. Each master also renders an `admin-local.conf` pointing at its own IP so bootstrap admin commands bypass the still-warming VIP.
 4. **addons** (delegated to `masters[0]`) — Calico CNI patched to VXLAN, metrics-server scaled to 2 replicas with limits.
 5. **hardening** (serial: 1 across masters) — flips `--anonymous-auth=false`, converts the apiserver static-pod probes to `tcpSocket`, approves pending kubelet-serving CSRs. Rolling restart, so the API stays reachable through HAProxy the whole time.
+6. **backup** — installs the etcd + Kubernetes config backup scripts under the data partition and registers a root cron at 23:55 (etcd snapshot on masters, config archive on every node). Also drops `etcdctl` into `/usr/local/bin` on masters.
 
 
 
@@ -229,6 +231,8 @@ Full reference (args, env vars, output paths, idempotency notes): [`docs/scripts
 scripts/
 ├── bootstrap.sh                  # interactive wizard (also `--rollback` to undo latest run)
 ├── download-artifacts.sh         # offline artifact pull/build
+├── backup-etcd.sh                # etcd snapshot (deployed to masters by the backup role)
+├── backup-k8s-config.sh          # k8s config archive (deployed to every node)
 └── helpers/
     ├── generate-inventory.sh     # invoked by bootstrap.sh
     └── load-images.sh            # invoked by the containerd role
@@ -241,6 +245,8 @@ scripts/
 | `./scripts/download-artifacts.sh` | Downloads every offline artifact (DEBs, binaries, HAProxy source build, images) |
 | `./scripts/helpers/generate-inventory.sh` | Generates `inventories/inventory.ini` from CLI args (called by `bootstrap.sh`) |
 | `./scripts/helpers/load-images.sh` | Imports container image tarballs into containerd (run by Ansible) |
+| `./scripts/backup-etcd.sh` | Daily etcd snapshot of the local member (deployed + scheduled by the backup role) |
+| `./scripts/backup-k8s-config.sh` | Daily archive of `/etc/kubernetes` + kubelet/kubeadm config (deployed + scheduled by the backup role) |
 
 # :lock: CIS Hardening
 
@@ -275,6 +281,7 @@ Full mapping (including ⚠️ partial / ❌ todo items): [`docs/cis-compliance.
   - [x] Calico (VXLAN)
   - [x] metrics-server (2 replicas + limits)
   - [x] k9s
+- [x] Automated backups (etcd snapshot + k8s config, daily cron, 90-day rotation)
 - [ ] Encryption at rest for etcd Secrets (CIS 1.2.25)
 - [ ] Pod Security Admission `restricted` profile (CIS 5.2.x)
 - [ ] Default deny-all NetworkPolicy per namespace (CIS 5.3.2)

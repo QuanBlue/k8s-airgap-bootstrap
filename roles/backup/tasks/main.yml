@@ -1,0 +1,88 @@
+---
+# Cài 2 script backup lên node và đặt lịch cron lúc 23:55.
+#   · backup-etcd.sh        → chỉ chạy trên master (cần etcd certs)
+#   · backup-k8s-config.sh  → chạy trên mọi node (master + worker)
+
+- name: Ensure backup directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  loop:
+    - "{{ backup.scripts_dir }}"
+    - "{{ backup.dest_root }}"
+    - "{{ backup_log_dir }}"
+
+- name: Install backup scripts
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../scripts/{{ item }}"
+    dest: "{{ backup.scripts_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0750"
+  loop:
+    - backup-etcd.sh
+    - backup-k8s-config.sh
+
+- name: Resolve etcdctl binary on control node (masters only)
+  set_fact:
+    etcdctl_binary_src: "{{ lookup('ansible.builtin.fileglob', airgap.artifacts_dir ~ '/bin/etcdctl', wantlist=True) | first | default('') }}"
+  when: "'masters' in group_names"
+
+- name: Install etcdctl from local binary bundle (masters only)
+  copy:
+    src: "{{ etcdctl_binary_src }}"
+    dest: /usr/local/bin/etcdctl
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - "'masters' in group_names"
+    - etcdctl_binary_src | length > 0
+
+- name: Fail if etcdctl is missing on a master (needed by backup-etcd.sh)
+  ansible.builtin.fail:
+    msg: >-
+      Không tìm thấy etcdctl tại {{ airgap.artifacts_dir }}/bin/etcdctl.
+      Chạy ./scripts/download-artifacts.sh binaries (hoặc ETCD_VERSION=vX.Y.Z ... binaries) trước.
+  when:
+    - "'masters' in group_names"
+    - etcdctl_binary_src | length == 0
+
+- name: Warn if 'zip' is missing (needed by backup-k8s-config.sh)
+  ansible.builtin.command: command -v zip
+  register: zip_check
+  changed_when: false
+  failed_when: false
+
+- name: Show zip warning
+  ansible.builtin.debug:
+    msg: "WARNING: 'zip' không có trên {{ inventory_hostname }} — backup-k8s-config.sh sẽ lỗi. Cài 'zip' trước."
+  when: zip_check.rc != 0
+
+- name: Schedule etcd snapshot backup (masters only)
+  ansible.builtin.cron:
+    name: "etcd snapshot backup"
+    minute: "{{ backup.schedule.minute }}"
+    hour: "{{ backup.schedule.hour }}"
+    user: root
+    job: >-
+      BACKUP_DST={{ backup.dest_root }}/etcd
+      RETENTION_DAYS={{ backup.retention_days }}
+      {{ backup.scripts_dir }}/backup-etcd.sh
+      >> {{ backup_log_dir }}/etcd-backup.log 2>&1
+  when: "'masters' in group_names"
+
+- name: Schedule kubernetes config backup (all nodes)
+  ansible.builtin.cron:
+    name: "kubernetes config backup"
+    minute: "{{ backup.schedule.minute }}"
+    hour: "{{ backup.schedule.hour }}"
+    user: root
+    job: >-
+      BACKUP_DST={{ backup.dest_root }}/kubernetes
+      RETENTION_DAYS={{ backup.retention_days }}
+      {{ backup.scripts_dir }}/backup-k8s-config.sh
+      >> {{ backup_log_dir }}/k8s-config-backup.log 2>&1

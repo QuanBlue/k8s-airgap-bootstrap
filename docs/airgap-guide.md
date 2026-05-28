@@ -7,7 +7,7 @@ Deploying a Kubernetes cluster in a completely offline (air-gapped) environment 
 | Kind | Location in the repo | Contents |
 |---|---|---|
 | OS DEB packages | `artifacts/packages/*.deb` | kubeadm, kubelet, kubectl, kubernetes-cni, keepalived, socat, conntrack, ipset, ipvsadm + transitive deps (libipset13, libnl-*, libnfnetlink0) |
-| Pre-built binaries | `artifacts/bin/` | `containerd-<ver>-linux-amd64.tar.gz`, `runc.amd64`, `crictl-<ver>-linux-amd64.tar.gz`, `helm`, `k9s`, `kubeadm`, `kubelet`, `kubectl` |
+| Pre-built binaries | `artifacts/bin/` | `containerd-<ver>-linux-amd64.tar.gz`, `runc.amd64`, `crictl-<ver>-linux-amd64.tar.gz`, `helm`, `k9s`, `kubeadm`, `kubelet`, `kubectl`, `etcdctl` (for etcd backups) |
 | HAProxy compiled binary | `artifacts/bin/haproxy-<ver>.tar.gz` | Source from haproxy.org, compiled with OpenSSL, PCRE2 JIT, zlib, systemd |
 | Container images | `artifacts/images/*.tar` | Every Kubernetes control-plane image, Calico images, the metrics-server image |
 | Manifests | `artifacts/manifests/` | `calico.yaml`, `metrics-server.yaml`, `installers-manifest.txt` (version summary) |

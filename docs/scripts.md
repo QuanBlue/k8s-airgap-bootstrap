@@ -153,7 +153,7 @@ Downloads or builds every offline artifact. Must run on a machine with internet 
 
 | Step | Description | Output | Time |
 |---|---|---|---|
-| `binaries` | Downloads containerd, runc, crictl, helm, k9s, kubeadm/kubelet/kubectl | `artifacts/bin/` | ~3 min |
+| `binaries` | Downloads containerd, runc, crictl, helm, k9s, kubeadm/kubelet/kubectl, and `etcdctl` (version matched to the cluster's etcd image) | `artifacts/bin/` | ~3 min |
 | `haproxy` | Downloads HAProxy 3.2.0 source → compiles (full features: OpenSSL, PCRE2, zlib, systemd) → packages as a binary tarball | `artifacts/bin/haproxy-<ver>.tar.gz` | ~5 min |
 | `deb` | Downloads offline DEB packages (kubeadm, kubelet, kubectl, keepalived, ipset, socat, conntrack, ipvsadm + transitive deps) | `artifacts/packages/*.deb` | ~2 min |
 | `manifests` | Downloads Calico + metrics-server YAML | `artifacts/manifests/` | <1 min |
@@ -172,8 +172,11 @@ HELM_VERSION=3.20.1          # helm
 K9S_VERSION=v0.50.18         # k9s
 HAPROXY_VERSION=3.2.0        # HAProxy source
 METRICS_SERVER_VERSION=v0.8.1 # metrics-server
+ETCD_VERSION=                # etcdctl release; empty = auto-derive from kubeadm's etcd image
 IMAGE_PLATFORM=linux/amd64   # container image platform
 ```
+
+> `ETCD_VERSION` is left empty by default — the `binaries` step runs `kubeadm config images list` and derives the matching etcd release (e.g. image `3.6.6-0` → `v3.6.6`). Set it explicitly (e.g. `ETCD_VERSION=v3.6.6`) only if that derivation fails (no network to query, custom registry, etc.).
 
 Override example:
 ```bash
@@ -237,6 +240,76 @@ ctr namespace ls   # verify k8s.io namespace exists
 ```bash
 IMAGE_PLATFORM=linux/amd64   # default
 ```
+
+---
+
+## `scripts/backup-etcd.sh`
+
+Takes an etcd snapshot of the **local** member and rotates old snapshots. The `backup` role copies it to every master (alongside `etcdctl` in `/usr/local/bin`) and schedules it via cron at 23:55. Run on a control-plane node — needs read access to `/etc/kubernetes/pki/etcd`.
+
+### Usage
+
+```bash
+# Standalone (auto-detects the local endpoint + certs)
+/u01/app/scripts/backup-etcd.sh
+
+# Override destination / retention / endpoint
+BACKUP_DST=/mnt/snap RETENTION_DAYS=30 /u01/app/scripts/backup-etcd.sh
+```
+
+### Behavior
+
+- Auto-detects the local client endpoint from `--advertise-client-urls` in `/etc/kubernetes/manifests/etcd.yaml` (falls back to `https://127.0.0.1:2379`). `snapshot save` only accepts **one** endpoint, so each master backs up its own member.
+- Saves `etcd-snapshot-<YYYYmmdd-HHMMSS>.db`, then verifies it with `etcdctl snapshot status`.
+- Deletes snapshots older than `RETENTION_DAYS` (default 90).
+
+### Environment variables
+
+```bash
+ETCD_ENDPOINT=               # default: local member from etcd.yaml
+ETCD_CACERT=/etc/kubernetes/pki/etcd/ca.crt
+ETCD_CERT=/etc/kubernetes/pki/etcd/server.crt
+ETCD_KEY=/etc/kubernetes/pki/etcd/server.key
+BACKUP_DST=/u01/app/backup/etcd
+RETENTION_DAYS=90
+```
+
+### Exit codes
+
+- `2` — missing `etcdctl` or unreadable certs (pre-flight)
+- `1` — snapshot save or integrity check failed
+
+---
+
+## `scripts/backup-k8s-config.sh`
+
+Archives the node's Kubernetes config into a single zip and rotates old archives. The `backup` role copies it to **every** node (master + worker) and schedules it via cron at 23:55.
+
+### Usage
+
+```bash
+/u01/app/scripts/backup-k8s-config.sh
+BACKUP_DST=/mnt/cfg RETENTION_DAYS=30 /u01/app/scripts/backup-k8s-config.sh
+```
+
+### Behavior
+
+- Stages `/etc/kubernetes`, kubelet config (`/var/lib/kubelet/config.yaml`, `/etc/default/kubelet`, `/etc/sysconfig/kubelet`, systemd drop-in), and kubeadm config (file, or dumped from the `kubeadm-config` ConfigMap via `kubectl` on masters).
+- Zips into `kubernetes-backup-<YYYYmmdd-HHMMSS>.zip` — extracts to a folder of the same name (staged in a `mktemp` dir, auto-cleaned on exit).
+- Deletes archives older than `RETENTION_DAYS` (default 90).
+- Requires `zip`. On a worker with no kubeadm config, that section is simply skipped.
+
+### Environment variables
+
+```bash
+BACKUP_DST=/u01/app/backup/kubernetes
+RETENTION_DAYS=90
+```
+
+### Exit codes
+
+- `2` — `zip` not installed
+- `1` — archive creation failed
 
 ---
 

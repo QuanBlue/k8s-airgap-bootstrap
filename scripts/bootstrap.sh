@@ -359,11 +359,15 @@ if [[ -n "$DATA_PARTITION_ROOT" ]]; then
     OFFLINE_IMAGES_DIR="${DATA_PARTITION_ROOT}/lib/k8s-offline-images"
     KUBELET_POD_LOGS_DIR="${DATA_PARTITION_ROOT}/log/containerd"
     AUDIT_LOG_DIR="${DATA_PARTITION_ROOT}/log/kubernetes/audit"
+    BACKUP_SCRIPTS_DIR="${DATA_PARTITION_ROOT}/scripts"
+    BACKUP_DEST_ROOT="${DATA_PARTITION_ROOT}/backup"
 else
     CONTAINERD_ROOT_DIR="/var/lib/containerd"
     OFFLINE_IMAGES_DIR="/var/lib/k8s-offline-images"
     KUBELET_POD_LOGS_DIR=""
     AUDIT_LOG_DIR="/var/log/kubernetes/audit"
+    BACKUP_SCRIPTS_DIR="/opt/k8s-backup/scripts"
+    BACKUP_DEST_ROOT="/var/backups/k8s"
 fi
 
 # ─── Generate Files ───────────────────────────────────────────────────────────
@@ -442,6 +446,16 @@ kubernetes_audit:
   max_age: 90        # days
   max_backup: 20     # rotated files
   max_size: 100      # MB per file
+
+# Backup: etcd snapshot (masters) + k8s config (all nodes), cron lúc 23:55
+backup:
+  enabled: true
+  scripts_dir: "$BACKUP_SCRIPTS_DIR"
+  dest_root: "$BACKUP_DEST_ROOT"
+  retention_days: 90
+  schedule:
+    minute: 55
+    hour: 23
 EOF
 
 cat <<EOF > inventories/group_vars/masters.yml

@@ -18,6 +18,8 @@ HELM_VERSION="${HELM_VERSION:-3.20.1}"
 K9S_VERSION="${K9S_VERSION:-v0.50.18}"
 HAPROXY_VERSION="${HAPROXY_VERSION:-3.2.0}"
 METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-v0.8.1}"
+# Để trống → tự suy ra từ image etcd mà kubeadm dùng (khớp version cluster).
+ETCD_VERSION="${ETCD_VERSION:-}"
 IMAGE_PLATFORM="${IMAGE_PLATFORM:-linux/amd64}"
 
 mkdir -p "$BIN_DIR" "$PKGS_DIR" "$IMAGES_DIR" "$MANIFESTS_DIR"
@@ -89,6 +91,34 @@ download_binary_bundle() {
         "https://dl.k8s.io/release/v${K8S_VERSION}/bin/linux/amd64/kubectl" \
         "$BIN_DIR/kubectl"
     chmod 0755 "$BIN_DIR/kubectl"
+
+    download_etcdctl
+}
+
+# etcdctl đi kèm trong release tarball của etcd. Dùng cho backup-etcd.sh trên master.
+download_etcdctl() {
+    local etcd_ver="$ETCD_VERSION"
+
+    # Suy ra version khớp với image etcd mà kubeadm chọn (vd 3.6.6-0 → v3.6.6).
+    if [[ -z "$etcd_ver" ]]; then
+        local img=""
+        img=$("$BIN_DIR/kubeadm" config images list --kubernetes-version "v${K8S_VERSION}" 2>/dev/null | grep -m1 'etcd:')
+        if [[ -n "$img" ]]; then
+            etcd_ver="v$(echo "$img" | sed -E 's#.*etcd:##; s#-[0-9]+$##')"
+        fi
+    fi
+
+    if [[ -z "$etcd_ver" ]]; then
+        log "WARN: không suy ra được ETCD_VERSION — đặt ETCD_VERSION=vX.Y.Z rồi chạy lại 'binaries'. Bỏ qua etcdctl."
+        return 0
+    fi
+
+    ETCD_VERSION="$etcd_ver"
+    download_file \
+        "https://github.com/etcd-io/etcd/releases/download/${etcd_ver}/etcd-${etcd_ver}-linux-amd64.tar.gz" \
+        "$TMP_DIR/etcd-${etcd_ver}-linux-amd64.tar.gz"
+    extract_tar_entry "$TMP_DIR/etcd-${etcd_ver}-linux-amd64.tar.gz" \
+        "etcd-${etcd_ver}-linux-amd64/etcdctl" "$BIN_DIR/etcdctl"
 }
 
 require_ubuntu_24_04_or_newer() {
@@ -372,6 +402,7 @@ write_manifest() {
         echo "K9S_VERSION=$K9S_VERSION"
         echo "HAPROXY_VERSION=$HAPROXY_VERSION"
         echo "METRICS_SERVER_VERSION=$METRICS_SERVER_VERSION"
+        echo "ETCD_VERSION=$ETCD_VERSION"
         echo "IMAGE_PLATFORM=$IMAGE_PLATFORM"
         echo
         echo "[bin]"

@@ -1,0 +1,13 @@
+---
+# Cài script backup + cron. Mặc định dưới đây bị group_vars/all.yml (sinh từ
+# bootstrap.sh theo DATA_PARTITION_ROOT) ghi đè. Để chạy độc lập vẫn an toàn.
+backup:
+  enabled: true
+  scripts_dir: /opt/k8s-backup/scripts   # nơi đặt 2 script backup
+  dest_root: /var/backups/k8s            # nơi chứa snapshot + archive
+  retention_days: 90
+  schedule:
+    minute: 55
+    hour: 23
+
+backup_log_dir: "{{ backup.dest_root }}/logs"
