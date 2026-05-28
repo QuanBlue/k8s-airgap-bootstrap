@@ -3,3 +3,17 @@ airgap:
   enabled: true
   artifacts_dir: "{{ playbook_dir | dirname }}/artifacts"
   offline_images_dir: "/var/lib/k8s-offline-images"
+
+keepalived_group_name: masters
+keepalived_instance_name: VI_1
+keepalived_check_name: check_haproxy
+keepalived_check_script_path: /etc/keepalived/check_haproxy.sh
+keepalived_check_ports:
+  - "{{ master_ha.vip_port }}"
+keepalived_vip_address: "{{ master_ha.vip_address }}"
+keepalived_interface: "{{ master_ha.vip_interface }}"
+keepalived_virtual_router_id: 51
+keepalived_auth_pass: "42"
+keepalived_advert_int: 1
+keepalived_priority_master: 101
+keepalived_priority_backup: 100

@@ -39,9 +39,9 @@
       changed_when: false
       ignore_errors: true
 
-# ── 2. Remove HA (HAProxy + Keepalived) on masters ───────────────────────────
-- name: Remove HA components from master nodes
-  hosts: masters
+# ── 2. Remove HA (HAProxy + Keepalived) from HA nodes ────────────────────────
+- name: Remove HA components from master and worker nodes
+  hosts: masters:workers
   become: true
   gather_facts: false
   tasks:
@@ -59,26 +59,38 @@
         enabled: false
       ignore_errors: true
 
-    - name: Remove Keepalived and related packages
-      shell: DEBIAN_FRONTEND=noninteractive apt-get remove -y --purge keepalived socat conntrack ipset ipvsadm 2>/dev/null || true
+    - name: Remove HAProxy, Keepalived, and related packages
+      shell: DEBIAN_FRONTEND=noninteractive apt-get remove -y --purge haproxy haproxy-common keepalived socat conntrack ipset ipvsadm 2>/dev/null || true
       changed_when: false
 
-    - name: Remove HAProxy binary, systemd unit, and directories
+    - name: Remove HAProxy binary, unit, runtime files, and directories
       file:
         path: "{{ item }}"
         state: absent
       loop:
         - /usr/local/sbin/haproxy
+        - /usr/sbin/haproxy
         - /etc/systemd/system/haproxy.service
+        - /lib/systemd/system/haproxy.service
+        - /usr/lib/systemd/system/haproxy.service
+        - /etc/default/haproxy
         - /etc/haproxy
         - /var/lib/haproxy
         - /run/haproxy
+        - /run/haproxy.pid
+        - /tmp/haproxy-extract
 
     - name: Remove haproxy system user
       user:
         name: haproxy
         state: absent
         remove: true
+      ignore_errors: true
+
+    - name: Remove haproxy system group
+      group:
+        name: haproxy
+        state: absent
       ignore_errors: true
 
     - name: Remove Keepalived config

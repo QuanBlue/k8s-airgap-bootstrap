@@ -15,19 +15,19 @@ defaults
     timeout client  50000
     timeout server  50000
 
-frontend kube-apiserver_frontend
-    bind *:{{ k8s_ha.vip_port }}
+{% for frontend in haproxy_frontends %}
+frontend {{ frontend.name }}_frontend
+    bind *:{{ frontend.bind_port }}
     mode tcp
     option tcplog
-    default_backend kube-apiserver_backend
+    default_backend {{ frontend.backend_name }}_backend
 
-backend kube-apiserver_backend
+backend {{ frontend.backend_name }}_backend
     mode tcp
     option tcp-check
     balance roundrobin
-    # Fast detection during bootstrap: check every 2s, mark UP after 1 success,
-    # no slowstart so traffic flows the moment apiserver responds.
-    default-server inter 2s fastinter 1s downinter 1s rise 1 fall 2 maxconn 250 maxqueue 256 weight 100
-{% for host in groups['masters'] %}
-    server {{ host }} {{ hostvars[host]['ansible_host'] }}:6443 check
+    default-server {{ frontend.default_server_options }}
+{% for host in groups[frontend.backend_group] %}
+    server {{ host }} {{ hostvars[host]['ansible_host'] }}:{{ frontend.backend_port }} check
+{% endfor %}
 {% endfor %}

@@ -15,6 +15,13 @@ Everything the repo provides and every real-world issue it fixes.
 - HAProxy logs to the systemd journal (`log stdout format raw daemon info`)
 - Service `Type=notify` in master-worker mode (`-Ws`)
 
+### Optional worker ingress VIP
+- Independent from `master_ha`; configured through `worker_ha`
+- HAProxy + Keepalived on every worker node
+- VIP floats only across `workers`
+- HAProxy listens on `80` and `443`
+- Traffic is balanced only to `workers:30080` and `workers:30443`
+
 ### Single master
 - HA is skipped; `controlPlaneEndpoint` is set to the first master's IP:6443
 
@@ -227,6 +234,62 @@ backup:
 Re-run just this play with `ansible-playbook playbooks/site.yml --tags backup`. Set `backup.enabled: false` to skip it entirely.
 
 **Restoring** from these backups: [`docs/restore-guide.md`](restore-guide.md).
+
+---
+
+## Host firewall (iptables role)
+
+The `iptables` role (play 7 of `site.yml`, tag `firewall`) is prompted by the
+wizard (default **on**). It installs a single custom chain `K8S-FW`, jumped at
+the top of `INPUT`, that **protects the sensitive host ports** while leaving
+everything else untouched. It never flushes the `filter` table or modifies
+`nat`/`mangle`/`FORWARD`, so Calico and kube-proxy are unaffected; the `INPUT`
+default policy stays `ACCEPT`.
+
+**The chain `RETURN`s (trusts) traffic from:**
+- loopback, `ESTABLISHED,RELATED`, ICMP
+- every cluster node IP (from inventory) — covers etcd, kubelet, Calico VXLAN/BGP, kube-proxy, VRRP
+- the pod CIDR and service CIDR
+- any extra `firewall.admin_cidrs`
+
+**Then it `DROP`s these ports for everyone else:**
+
+| Node | Dropped from outside the cluster | Always open |
+|---|---|---|
+| master | `6443` (API), `2379-2380` (etcd), `10257` (c-m), `10259` (sched), `10250` (kubelet) | `22` (SSH), `8443` (HAProxy → API), NodePort, VRRP |
+| worker | `10250` (kubelet), `10256` (kube-proxy) | `22` (SSH), optional worker VIP `80/443`, NodePort, VRRP |
+
+So external administration must go through HAProxy `8443` (the API is not
+reachable on `6443` from outside the cluster). If `worker_ha.enabled=true`,
+workers may also receive ingress traffic on `80/443`. SSH stays open from
+anywhere. Rules persist across reboot via `iptables-persistent`
+(`/etc/iptables/rules.v4`), bundled offline by `download-artifacts.sh`.
+
+```yaml
+firewall:
+  enabled: true
+  nodeport_open: true       # allow 30000-32767 from anywhere
+  admin_cidrs: []           # extra trusted sources for 6443/10250
+```
+
+```yaml
+worker_ha:
+  enabled: false
+  vip_address: ""
+  vip_interface: ""
+  http_port: 80
+  https_port: 443
+  backend_http_port: 30080
+  backend_https_port: 30443
+```
+
+Re-run just this play with `ansible-playbook playbooks/site.yml --tags firewall`.
+Set `firewall.enabled: false` (or answer "no" in the wizard) to skip it — e.g.
+when a cloud Security Group already enforces this.
+
+> The chain ends in `RETURN` (selective protection). Changing that final rule to
+> `DROP` in `roles/iptables/templates/apply-firewall.sh.j2` would upgrade it to a
+> full default-deny INPUT allowlist.
 
 ---
 

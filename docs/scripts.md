@@ -54,12 +54,13 @@ The wizard walks through the following sections (every prompt has a sensible def
 | | Pod CIDR | `10.244.0.0/16` | Must not overlap the LAN range |
 | | Service CIDR | `10.96.0.0/12` | |
 | | Calico IP autodetection | `first-found` | Prefer `interface=eth0` or `cidr=10.0.6.0/24` |
-| | Data partition root | (empty) | e.g. `/u01/app` — containerd, pod logs, audit logs, and offline images all move under this root |
+| | Data partition root | (empty) | e.g. `/u01/app` — containerd, pod logs, audit logs, offline images, and backups all move under this root |
+| | Configure host firewall (iptables)? | `yes` | Installs the `iptables` role (protects control-plane/etcd/kubelet ports; API via HAProxy `8443`). Answer `no` to skip |
 
 ### Output
 
 - `inventories/inventory.ini` — Ansible inventory with hostnames + IPs
-- `inventories/group_vars/all.yml` — all config (k8s_ha, calico, audit, kubelet, …)
+- `inventories/group_vars/all.yml` — all config (master_ha, worker_ha, calico, audit, kubelet, …)
 - `inventories/group_vars/masters.yml` — `node_role: master`
 - `inventories/group_vars/workers.yml` — `node_role: worker`
 - `.bootstrap-backups/<timestamp>/` — snapshot of the previous files before overwrite
@@ -155,7 +156,7 @@ Downloads or builds every offline artifact. Must run on a machine with internet 
 |---|---|---|---|
 | `binaries` | Downloads containerd, runc, crictl, helm, k9s, kubeadm/kubelet/kubectl, and `etcdctl` (version matched to the cluster's etcd image) | `artifacts/bin/` | ~3 min |
 | `haproxy` | Downloads HAProxy 3.2.0 source → compiles (full features: OpenSSL, PCRE2, zlib, systemd) → packages as a binary tarball | `artifacts/bin/haproxy-<ver>.tar.gz` | ~5 min |
-| `deb` | Downloads offline DEB packages (kubeadm, kubelet, kubectl, keepalived, ipset, socat, conntrack, ipvsadm + transitive deps) | `artifacts/packages/*.deb` | ~2 min |
+| `deb` | Downloads offline DEB packages (kubeadm, kubelet, kubectl, keepalived, iptables-persistent, ipset, socat, conntrack, ipvsadm + transitive deps) | `artifacts/packages/*.deb` | ~2 min |
 | `manifests` | Downloads Calico + metrics-server YAML | `artifacts/manifests/` | <1 min |
 | `images` | Pulls every Kubernetes / Calico / metrics-server image and saves as tar | `artifacts/images/*.tar` | ~5-10 min |
 | `manifest` | Writes a version + file-list summary | `artifacts/manifests/installers-manifest.txt` | <1s |

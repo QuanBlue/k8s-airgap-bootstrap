@@ -2,8 +2,8 @@ apiVersion: kubeadm.k8s.io/v1beta4
 kind: ClusterConfiguration
 kubernetesVersion: v{{ kubernetes_version }}
 clusterName: "{{ cluster_name }}"
-{% if k8s_ha.enabled | default(false) | bool %}
-controlPlaneEndpoint: "{{ k8s_ha.vip_address }}:{{ k8s_ha.vip_port }}"
+{% if master_ha.enabled | default(false) | bool %}
+controlPlaneEndpoint: "{{ master_ha.vip_address }}:{{ master_ha.vip_port }}"
 {% else %}
 controlPlaneEndpoint: "{{ hostvars[inventory_hostname]['ansible_host'] }}:6443"
 {% endif %}

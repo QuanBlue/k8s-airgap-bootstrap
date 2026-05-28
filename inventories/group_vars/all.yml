@@ -26,11 +26,20 @@ kubelet:
   image_gc_low_threshold_percent: 60
 
 # High Availability Settings
-k8s_ha:
+master_ha:
   enabled: true
   vip_address: "10.0.6.99"
   vip_interface: "eth0"
   vip_port: 8443
+
+worker_ha:
+  enabled: true
+  vip_address: "10.0.6.23"
+  vip_interface: "eth0"
+  http_port: 80
+  https_port: 443
+  backend_http_port: 30080
+  backend_https_port: 30443
 
 # Calico CNI
 calico_networking_backend: vxlan
@@ -60,3 +69,9 @@ backup:
   schedule:
     minute: 55
     hour: 23
+
+# Host firewall (iptables) — bảo vệ port control-plane/etcd/kubelet
+firewall:
+  enabled: true
+  nodeport_open: true
+  admin_cidrs: []

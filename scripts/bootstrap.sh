@@ -313,6 +313,9 @@ ask ANSIBLE_SSH_PRIVATE_KEY_FILE "SSH private key" "" \
 VIP_ENABLED="false"
 VIP_ADDRESS=""
 VIP_INTERFACE=""
+WORKER_HA_ENABLED="false"
+WORKER_HA_ADDRESS=""
+WORKER_HA_INTERFACE=""
 
 if [ "$MASTER_COUNT" -gt 1 ]; then
     section "High Availability"
@@ -338,6 +341,26 @@ if [ "$MASTER_COUNT" -gt 1 ]; then
     fi
 fi
 
+if [ "$WORKER_COUNT" -gt 0 ]; then
+    ask ENABLE_WORKER_HA "Enable worker VIP?" "no" \
+        "Bật VIP riêng cho ingress/application traffic trên nhóm worker.\n    Keepalived + HAProxy sẽ chạy trên mọi worker và mở ${BOLD}80/443${NC}.\n    HAProxy forward tới chính các worker ở 30080/30443." \
+        "(yes/no)"
+
+    if [[ "$ENABLE_WORKER_HA" == "yes" || "$ENABLE_WORKER_HA" == "y" ]]; then
+        WORKER_HA_ENABLED="true"
+
+        ask WORKER_HA_ADDRESS "Worker VIP address" "10.0.6.200" \
+            "Địa chỉ ảo ingress nằm trên nhóm worker, tách biệt với VIP của master."
+
+        ask WORKER_HA_INTERFACE "Worker VIP interface" "eth0" \
+            "Card mạng trên các worker sẽ gán worker VIP."
+
+        if [[ -z "$WORKER_HA_ADDRESS" || -z "$WORKER_HA_INTERFACE" ]]; then
+            err "Worker VIP address và interface là bắt buộc khi bật worker VIP."
+        fi
+    fi
+fi
+
 # ─── 5 / 5  Cluster Network ───────────────────────────────────────────────────
 section "Cluster Network"
 
@@ -352,6 +375,16 @@ ask CALICO_IP_AUTODETECTION "Calico IP autodetection" "first-found" \
 ask DATA_PARTITION_ROOT "Data partition root" "" \
     "Phân vùng riêng để chứa dữ liệu K8s. Ví dụ nhập /u01/app:\n      · /u01/app/lib/containerd        — containerd root dir\n      · /u01/app/lib/k8s-offline-images — offline image store\n      · /u01/app/log/containerd        — kubelet pod logs\n    Để trống → dùng mặc định: /var/lib/containerd, /var/lib/k8s-offline-images" \
     "(optional)"
+
+ask ENABLE_FIREWALL "Configure host firewall (iptables)?" "yes" \
+    "Bảo vệ port control-plane/etcd/kubelet bằng iptables.\n    · 6443 (API) chỉ truy cập từ trong cụm — quản trị ngoài qua HAProxy ${VIP_ADDRESS:-VIP}:8443\n    · SSH (22), NodePort vẫn mở\n    Tắt nếu firewall do hạ tầng/Cloud SG đảm nhiệm." \
+    "(yes/no)"
+
+if [[ "$ENABLE_FIREWALL" == "yes" || "$ENABLE_FIREWALL" == "y" ]]; then
+    FIREWALL_ENABLED="true"
+else
+    FIREWALL_ENABLED="false"
+fi
 
 if [[ -n "$DATA_PARTITION_ROOT" ]]; then
     DATA_PARTITION_ROOT="${DATA_PARTITION_ROOT%/}"
@@ -422,11 +455,20 @@ kubelet:
   image_gc_low_threshold_percent: 60
 
 # High Availability Settings
-k8s_ha:
+master_ha:
   enabled: $VIP_ENABLED
   vip_address: "$VIP_ADDRESS"
   vip_interface: "$VIP_INTERFACE"
   vip_port: 8443
+
+worker_ha:
+  enabled: $WORKER_HA_ENABLED
+  vip_address: "$WORKER_HA_ADDRESS"
+  vip_interface: "$WORKER_HA_INTERFACE"
+  http_port: 80
+  https_port: 443
+  backend_http_port: 30080
+  backend_https_port: 30443
 
 # Calico CNI
 calico_networking_backend: vxlan
@@ -456,6 +498,12 @@ backup:
   schedule:
     minute: 55
     hour: 23
+
+# Host firewall (iptables) — bảo vệ port control-plane/etcd/kubelet
+firewall:
+  enabled: $FIREWALL_ENABLED
+  nodeport_open: true
+  admin_cidrs: []
 EOF
 
 cat <<EOF > inventories/group_vars/masters.yml

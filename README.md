@@ -71,13 +71,14 @@ See it in action:
 # :star: Key features
 
 - **Fully air-gapped** — DEB packages, container images, kubelet/kubeadm/kubectl binaries, and a from-source HAProxy build are all bundled offline.
-- **Multi-master HA** — HAProxy (compiled from source v3.2.0) + Keepalived VIP, with a port-split design (VIP:8443 → masters:6443) so HAProxy and the apiserver coexist on the same master nodes.
+- **Dual HA paths** — control-plane HA via HAProxy + Keepalived on masters (`VIP:8443 → masters:6443`), plus an optional worker ingress VIP (`VIP:80/443 → workers:30080/30443`).
 - **CIS-aligned hardening** — anonymous-auth disabled (1.2.1), TLS 1.2+ with a strong cipher list (1.2.14/1.2.15), full API audit logging (1.2.18-22, 3.2.1), kubelet serving cert rotation with auto-CSR-approval (4.2.12). Full mapping: [`docs/cis-compliance.md`](docs/cis-compliance.md).
 - **Modern stack** — containerd v2.3.1 runtime, Calico CNI in VXLAN mode, metrics-server v0.8.1 with 2 replicas + resource limits.
 - **Configurable data partition** — every filesystem-heavy path (containerd root, kubelet pod logs, audit logs, offline images, backups) follows one wizard prompt.
 - **Automated backups** — daily cron at 23:55: etcd snapshot on every master (local member) + Kubernetes config archive (`/etc/kubernetes`, kubelet, kubeadm) on every node, both with 90-day rotation.
+- **Host firewall** — optional iptables role (prompted, default on) that shields the control-plane/etcd/kubelet ports to cluster-internal access only; admins reach the API via HAProxy `8443`, while SSH, worker VIP `80/443`, and NodePort stay open. Rules persist via `iptables-persistent`.
 - **Idempotent** — playbooks detect stale state and self-heal (auto-reset+init on a dead apiserver, rename-or-skip for app user, replace-without-duplicates for hardening patches).
-- **Interactive wizard** — `bootstrap.sh` walks through cluster identity, topology, IPs, VIP, network CIDRs, Calico autodetection, and data partition root — every prompt has a sensible default.
+- **Interactive wizard** — `bootstrap.sh` walks through cluster identity, topology, master VIP, optional worker VIP, network CIDRs, Calico autodetection, and data partition root — every prompt has a sensible default.
 - **Dynamic topology** — any master/worker count, IPs prompted per node, hostnames templated as `<Short>-<Env>[-Cluster<N>]-K8s-Master|Worker-NN`.
 - **Cluster operations UX** — `k9s` installed on every master for both `root` and the application user.
 - **Full teardown** — `playbooks/teardown.yml` reverses everything `site.yml` installed.
@@ -91,8 +92,8 @@ See it in action:
 ### Layers
 
 - **Control node** — runs Ansible, owns the offline `artifacts/` bundle, and pushes everything to the cluster nodes over SSH. Never part of the cluster itself.
-- **Master nodes** (`>= 3` recommended) — each one stacks the full control plane (kube-apiserver + controller-manager + scheduler + etcd) **plus** HAProxy and Keepalived. No dedicated load-balancer hosts needed.
-- **Worker nodes** — kubelet + kube-proxy + Calico CNI pod. Pure data plane.
+- **Master nodes** (`>= 3` recommended) — each one stacks the full control plane (kube-apiserver + controller-manager + scheduler + etcd) **plus** HAProxy and Keepalived for the API VIP. No dedicated load-balancer hosts needed.
+- **Worker nodes** — kubelet + kube-proxy + Calico CNI pod. Optionally they also run HAProxy + Keepalived for a separate ingress VIP.
 
 ### Control-plane traffic flow
 
@@ -125,16 +126,42 @@ flowchart TD
 
 **Failover:** Keepalived runs VRRP between masters. When the VIP holder dies, a `BACKUP` master takes the VIP within ~3 seconds. HAProxy backend checks (`inter 2s rise 1 fall 2`, no slowstart) re-mark unhealthy backends quickly so traffic keeps flowing as soon as the new VIP holder is up.
 
+### Worker ingress VIP flow
+
+```mermaid
+flowchart TD
+    Client["<b>Client</b><br/>browser · app · reverse proxy"]
+    WVIP["<b>Worker VIP</b><br/>one worker holds it at a time (VRRP)"]
+    WHTTP["<b>HAProxy frontend</b> · <code>*:80</code>"]
+    WHTTPS["<b>HAProxy frontend</b> · <code>*:443</code>"]
+    W1["<b>worker-01</b><br/>NodePort :30080 / :30443"]
+    W2["<b>worker-02</b><br/>NodePort :30080 / :30443"]
+    W3["<b>worker-03</b><br/>NodePort :30080 / :30443"]
+
+    Client --> WVIP
+    WVIP --> WHTTP
+    WVIP --> WHTTPS
+    WHTTP --> W1
+    WHTTP --> W2
+    WHTTP --> W3
+    WHTTPS --> W1
+    WHTTPS --> W2
+    WHTTPS --> W3
+```
+
+The worker VIP is optional and independent from `master_ha`. When enabled through `worker_ha`, every worker runs Keepalived and HAProxy, the VIP floats only across `workers`, and HAProxy forwards traffic only to `workers:30080` and `workers:30443`.
+
 ### Bootstrap pipeline
 
-`ansible-playbook playbooks/site.yml` runs six plays in order:
+`ansible-playbook playbooks/site.yml` runs seven plays in order:
 
 1. **prepare** — OS hygiene on every node (swap off, kernel modules, sysctl, hostnames, `/etc/hosts`, app user) + containerd install + offline image load.
-2. **ha** — installs HAProxy (from-source binary) + Keepalived on every master. HAProxy starts up with all backends DOWN at this point; that's expected.
+2. **ha** — installs HAProxy (from-source binary) + Keepalived on every master for the API VIP, and optionally on every worker for the ingress VIP. HAProxy starts up with all backends DOWN at this point; that's expected.
 3. **kubernetes** — `kubeadm init` on `masters[0]`, then `kubeadm join --control-plane` on the other masters, then `kubeadm join` on workers. Each master also renders an `admin-local.conf` pointing at its own IP so bootstrap admin commands bypass the still-warming VIP.
 4. **addons** (delegated to `masters[0]`) — Calico CNI patched to VXLAN, metrics-server scaled to 2 replicas with limits.
 5. **hardening** (serial: 1 across masters) — flips `--anonymous-auth=false`, converts the apiserver static-pod probes to `tcpSocket`, approves pending kubelet-serving CSRs. Rolling restart, so the API stays reachable through HAProxy the whole time.
 6. **backup** — installs the etcd + Kubernetes config backup scripts under the data partition and registers a root cron at 23:55 (etcd snapshot on masters, config archive on every node). Also drops `etcdctl` into `/usr/local/bin` on masters. Restore steps: [`docs/restore-guide.md`](docs/restore-guide.md).
+7. **firewall** (optional, default on) — installs an iptables custom chain on every node that restricts control-plane/etcd/kubelet ports to cluster-internal sources; SSH, API HAProxy `8443`, optional worker VIP `80/443`, and NodePort stay open. Persisted with `iptables-persistent`.
 
 
 
@@ -282,6 +309,7 @@ Full mapping (including ⚠️ partial / ❌ todo items): [`docs/cis-compliance.
   - [x] metrics-server (2 replicas + limits)
   - [x] k9s
 - [x] Automated backups (etcd snapshot + k8s config, daily cron, 90-day rotation)
+- [x] Host firewall (iptables) protecting control-plane/etcd/kubelet ports
 - [ ] Encryption at rest for etcd Secrets (CIS 1.2.25)
 - [ ] Pod Security Admission `restricted` profile (CIS 5.2.x)
 - [ ] Default deny-all NetworkPolicy per namespace (CIS 5.3.2)

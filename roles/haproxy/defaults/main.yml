@@ -3,3 +3,11 @@ airgap:
   enabled: true
   artifacts_dir: "{{ playbook_dir | dirname }}/artifacts"
   offline_images_dir: "/var/lib/k8s-offline-images"
+
+haproxy_frontends:
+  - name: kube-apiserver
+    bind_port: "{{ master_ha.vip_port }}"
+    backend_name: kube-apiserver
+    backend_group: masters
+    backend_port: 6443
+    default_server_options: "inter 2s fastinter 1s downinter 1s rise 1 fall 2 maxconn 250 maxqueue 256 weight 100"

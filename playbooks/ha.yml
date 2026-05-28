@@ -12,9 +12,52 @@
     - name: Apply HAProxy role
       include_role:
         name: haproxy
-      when: k8s_ha.enabled | default(false) | bool
+      when: master_ha.enabled | default(false) | bool
 
     - name: Apply Keepalived role
       include_role:
         name: keepalived
-      when: k8s_ha.enabled | default(false) | bool
+      when: master_ha.enabled | default(false) | bool
+
+- name: Configure Worker VIP for ingress traffic
+  hosts: workers
+  become: true
+  module_defaults:
+    ansible.builtin.gather_facts:
+      gather_timeout: 30
+  tags: ['ha']
+  tasks:
+    - name: Apply HAProxy role for worker VIP
+      include_role:
+        name: haproxy
+      vars:
+        haproxy_frontends:
+          - name: ingress-http
+            bind_port: "{{ worker_ha.http_port }}"
+            backend_name: ingress-http
+            backend_group: workers
+            backend_port: "{{ worker_ha.backend_http_port }}"
+            default_server_options: "inter 2s fastinter 1s downinter 1s rise 1 fall 2 maxconn 250 maxqueue 256 weight 100"
+          - name: ingress-https
+            bind_port: "{{ worker_ha.https_port }}"
+            backend_name: ingress-https
+            backend_group: workers
+            backend_port: "{{ worker_ha.backend_https_port }}"
+            default_server_options: "inter 2s fastinter 1s downinter 1s rise 1 fall 2 maxconn 250 maxqueue 256 weight 100"
+      when: worker_ha.enabled | default(false) | bool
+
+    - name: Apply Keepalived role for worker VIP
+      include_role:
+        name: keepalived
+      vars:
+        keepalived_group_name: workers
+        keepalived_instance_name: VI_WORKER
+        keepalived_check_name: check_worker_haproxy
+        keepalived_check_script_path: /etc/keepalived/check_worker_haproxy.sh
+        keepalived_check_ports:
+          - "{{ worker_ha.http_port }}"
+          - "{{ worker_ha.https_port }}"
+        keepalived_vip_address: "{{ worker_ha.vip_address }}"
+        keepalived_interface: "{{ worker_ha.vip_interface }}"
+        keepalived_virtual_router_id: 52
+      when: worker_ha.enabled | default(false) | bool

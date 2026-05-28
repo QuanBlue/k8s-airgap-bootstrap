@@ -26,16 +26,24 @@
 
 - name: Create keepalived health check script
   copy:
-    dest: /etc/keepalived/check_apiserver.sh
+    dest: "{{ keepalived_check_script_path }}"
     content: |
-      #!/bin/sh
+      #!/bin/bash
       errorExit() {
           echo "*** $*" 1>&2
           exit 1
       }
-      curl --silent --max-time 2 --insecure https://localhost:{{ k8s_ha.vip_port }}/ -o /dev/null || errorExit "Error GET https://localhost:{{ k8s_ha.vip_port }}/"
-      if ip addr | grep -q {{ k8s_ha.vip_address }}; then
-          curl --silent --max-time 2 --insecure https://{{ k8s_ha.vip_address }}:{{ k8s_ha.vip_port }}/ -o /dev/null || errorExit "Error GET https://{{ k8s_ha.vip_address }}:{{ k8s_ha.vip_port }}/"
+      check_port() {
+          local host="$1" port="$2"
+          timeout 2 bash -c "exec 3<>/dev/tcp/${host}/${port}" >/dev/null 2>&1 || errorExit "TCP check failed for ${host}:${port}"
+      }
+      for port in {% for port in keepalived_check_ports %}{{ port }} {% endfor %}; do
+          check_port "127.0.0.1" "$port"
+      done
+      if ip addr | grep -q "{{ keepalived_vip_address }}"; then
+          for port in {% for port in keepalived_check_ports %}{{ port }} {% endfor %}; do
+              check_port "{{ keepalived_vip_address }}" "$port"
+          done
       fi
     mode: '0755'
 
