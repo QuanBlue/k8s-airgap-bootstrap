@@ -226,6 +226,8 @@ backup:
 
 Re-run just this play with `ansible-playbook playbooks/site.yml --tags backup`. Set `backup.enabled: false` to skip it entirely.
 
+**Restoring** from these backups: [`docs/restore-guide.md`](restore-guide.md).
+
 ---
 
 ## Idempotency

@@ -134,7 +134,7 @@ flowchart TD
 3. **kubernetes** — `kubeadm init` on `masters[0]`, then `kubeadm join --control-plane` on the other masters, then `kubeadm join` on workers. Each master also renders an `admin-local.conf` pointing at its own IP so bootstrap admin commands bypass the still-warming VIP.
 4. **addons** (delegated to `masters[0]`) — Calico CNI patched to VXLAN, metrics-server scaled to 2 replicas with limits.
 5. **hardening** (serial: 1 across masters) — flips `--anonymous-auth=false`, converts the apiserver static-pod probes to `tcpSocket`, approves pending kubelet-serving CSRs. Rolling restart, so the API stays reachable through HAProxy the whole time.
-6. **backup** — installs the etcd + Kubernetes config backup scripts under the data partition and registers a root cron at 23:55 (etcd snapshot on masters, config archive on every node). Also drops `etcdctl` into `/usr/local/bin` on masters.
+6. **backup** — installs the etcd + Kubernetes config backup scripts under the data partition and registers a root cron at 23:55 (etcd snapshot on masters, config archive on every node). Also drops `etcdctl` into `/usr/local/bin` on masters. Restore steps: [`docs/restore-guide.md`](docs/restore-guide.md).
 
 
 
