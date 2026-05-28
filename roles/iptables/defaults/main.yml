@@ -1,0 +1,6 @@
+---
+# Host firewall. Mặc định bị group_vars/all.yml (sinh từ bootstrap.sh) ghi đè.
+firewall:
+  enabled: true
+  nodeport_open: true            # cho phép 30000-32767 từ mọi nguồn
+  admin_cidrs: []                # dải tin cậy thêm cho 6443/10250 (tuỳ chọn)

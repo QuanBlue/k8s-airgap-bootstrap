@@ -5,3 +5,4 @@
 - import_playbook: ha.yml
 - import_playbook: kubernetes.yml
 - import_playbook: backup.yml
+- import_playbook: firewall.yml

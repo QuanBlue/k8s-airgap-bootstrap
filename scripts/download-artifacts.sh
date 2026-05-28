@@ -210,6 +210,7 @@ EOF
         kubectl \
         kubernetes-cni \
         keepalived \
+        iptables-persistent \
         socat \
         conntrack \
         ipset \

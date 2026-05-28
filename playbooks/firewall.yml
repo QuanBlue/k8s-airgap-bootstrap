@@ -1,0 +1,14 @@
+---
+# Host firewall (iptables) trên mọi node. Bảo vệ port control-plane/etcd/kubelet;
+# giữ SSH + HAProxy + NodePort mở. Chạy SAU khi cluster + Calico đã lên.
+
+- name: Configure host firewall
+  hosts: all
+  become: true
+  module_defaults:
+    ansible.builtin.gather_facts:
+      gather_timeout: 30
+  tags: ['firewall']
+  roles:
+    - role: iptables
+      when: firewall.enabled | default(true)

@@ -1,0 +1,54 @@
+---
+# Cài host firewall: bảo vệ port control-plane/etcd/kubelet, giữ SSH + HAProxy mở.
+# Chạy sau khi cluster + Calico đã lên (xem playbooks/firewall.yml).
+
+- name: Preseed iptables-persistent (no interactive prompt)
+  ansible.builtin.debconf:
+    name: iptables-persistent
+    question: "{{ item }}"
+    vtype: boolean
+    value: "true"
+  loop:
+    - iptables-persistent/autosave_v4
+    - iptables-persistent/autosave_v6
+  when: airgap.enabled | default(true) | bool
+
+- name: Stage offline DEB packages into apt cache
+  ansible.builtin.shell: cp /tmp/k8s-packages/*.deb /var/cache/apt/archives/ 2>/dev/null || true
+  changed_when: false
+  when: airgap.enabled | default(true) | bool
+
+- name: Install iptables-persistent via apt (resolves from local cache)
+  ansible.builtin.apt:
+    name: iptables-persistent
+    state: present
+    update_cache: no
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Render host firewall script
+  ansible.builtin.template:
+    src: apply-firewall.sh.j2
+    dest: /usr/local/sbin/k8s-apply-firewall.sh
+    owner: root
+    group: root
+    mode: "0750"
+  register: fw_script
+
+- name: Capture iptables state before apply
+  ansible.builtin.command: iptables-save
+  register: ipt_before
+  changed_when: false
+
+- name: Apply host firewall rules
+  ansible.builtin.command: /usr/local/sbin/k8s-apply-firewall.sh
+  changed_when: false
+
+- name: Capture iptables state after apply
+  ansible.builtin.command: iptables-save
+  register: ipt_after
+  changed_when: ipt_after.stdout != ipt_before.stdout
+
+- name: Persist rules across reboot (netfilter-persistent save)
+  ansible.builtin.command: netfilter-persistent save
+  when: ipt_after.stdout != ipt_before.stdout
