@@ -8,6 +8,7 @@ kubernetes_version: "1.36.0"
 
 # Networking
 network:
+  node_cidr: "10.0.6.0/24"
   pod_cidr: "10.244.0.0/16"
   service_cidr: "10.96.0.0/12"
 
@@ -63,7 +64,7 @@ kubernetes_audit:
 # Backup: etcd snapshot (masters) + k8s config (all nodes), cron lúc 23:55
 backup:
   enabled: true
-  scripts_dir: "/u01/app/scripts"
+  scripts_dir: "/u01/app/scripts/backup"
   dest_root: "/u01/app/backup"
   retention_days: 90
   schedule:
@@ -73,5 +74,34 @@ backup:
 # Host firewall (iptables) — bảo vệ port control-plane/etcd/kubelet
 firewall:
   enabled: true
+  scripts_dir: "/u01/app/scripts/iptables"
   nodeport_open: true
   admin_cidrs: []
+
+external_services:
+  prometheus:
+    enabled: true
+    scraper_ips:
+      - "10.129.0.158"
+      - "10.129.0.159"
+      - "10.129.0.160"
+      - "10.129.0.163"
+      - "10.129.0.164"
+      - "10.129.0.165"
+  teleport:
+    enabled: true
+    proxy_ips:
+      - "10.129.0.232"
+  ntp:
+    enabled: false
+    server_ips: []
+  soc:
+    enabled: false
+    nsm_ips: []
+    forwarder_ips: []
+
+external_databases:
+  enabled: false
+  mongodb_ips: []
+  mariadb_ips: []
+  dorisdb_ips: []

@@ -56,11 +56,14 @@ The wizard walks through the following sections (every prompt has a sensible def
 | | Calico IP autodetection | `first-found` | Prefer `interface=eth0` or `cidr=10.0.6.0/24` |
 | | Data partition root | (empty) | e.g. `/u01/app` — containerd, pod logs, audit logs, offline images, and backups all move under this root |
 | | Configure host firewall (iptables)? | `yes` | Installs the `iptables` role (protects control-plane/etcd/kubelet ports; API via HAProxy `8443`). Answer `no` to skip |
+| | Has Prometheus scrapers? | `yes` | Adds inbound allowlist for scraper IPs to TCP `9000:9300` |
+| | Has Teleport? | `yes` | Adds outbound-only firewall allowlist for Teleport Proxy/Auth IPs, default `10.129.0.232`, on TCP `443/3080/3024` |
+| | Use fixed NTP servers? | `no` | Restricts NTP egress to configured server IPs instead of generic UDP `123` |
 
 ### Output
 
 - `inventories/inventory.ini` — Ansible inventory with hostnames + IPs
-- `inventories/group_vars/all.yml` — all config (master_ha, worker_ha, calico, audit, kubelet, …)
+- `inventories/group_vars/all.yml` — all config (master_ha, worker_ha, calico, audit, kubelet, firewall endpoint data, …)
 - `inventories/group_vars/masters.yml` — `node_role: master`
 - `inventories/group_vars/workers.yml` — `node_role: worker`
 - `.bootstrap-backups/<timestamp>/` — snapshot of the previous files before overwrite
@@ -70,6 +73,11 @@ The wizard walks through the following sections (every prompt has a sensible def
 - **`group_vars/` MUST live under `inventories/`**. Ansible only loads `group_vars/` directories adjacent to either the inventory or the playbook.
 - If variables are silently ignored, check the location first.
 - Re-running `bootstrap.sh` is safe — each run snapshots the previous files into `.bootstrap-backups/<timestamp>/`.
+- The firewall logic in `scripts/servers/iptables/k8s-master-iptables-rules.sh` and `scripts/servers/iptables/k8s-worker-iptables-rules.sh` is source of truth.
+- The wizard updates only the bootstrap-managed value block inside those scripts using the generated config, so manual rule logic outside that block is preserved.
+- Prometheus, Teleport, and NTP endpoint values collected by the wizard are synced into that value block and rendered under `external_services`.
+- When `firewall.enabled=true`, the firewall role copies the appropriate script to `firewall.scripts_dir` on each node (for example `/u01/app/scripts/iptables`) and executes it directly.
+- The firewall scripts manage only dedicated `INPUT`/`OUTPUT` chains; they do not flush or edit Calico-owned `FORWARD`, `nat`, `mangle`, or `cali-*` dataplane rules.
 
 ---
 
@@ -244,7 +252,7 @@ IMAGE_PLATFORM=linux/amd64   # default
 
 ---
 
-## `scripts/backup-etcd.sh`
+## `scripts/servers/backup/backup-etcd.sh`
 
 Takes an etcd snapshot of the **local** member and rotates old snapshots. The `backup` role copies it to every master (alongside `etcdctl` in `/usr/local/bin`) and schedules it via cron at 23:55. Run on a control-plane node — needs read access to `/etc/kubernetes/pki/etcd`.
 
@@ -252,10 +260,10 @@ Takes an etcd snapshot of the **local** member and rotates old snapshots. The `b
 
 ```bash
 # Standalone (auto-detects the local endpoint + certs)
-/u01/app/scripts/backup-etcd.sh
+/u01/app/scripts/backup/backup-etcd.sh
 
 # Override destination / retention / endpoint
-BACKUP_DST=/mnt/snap RETENTION_DAYS=30 /u01/app/scripts/backup-etcd.sh
+BACKUP_DST=/mnt/snap RETENTION_DAYS=30 /u01/app/scripts/backup/backup-etcd.sh
 ```
 
 ### Behavior
@@ -282,15 +290,15 @@ RETENTION_DAYS=90
 
 ---
 
-## `scripts/backup-k8s-config.sh`
+## `scripts/servers/backup/backup-k8s-config.sh`
 
 Archives the node's Kubernetes config into a single zip and rotates old archives. The `backup` role copies it to **every** node (master + worker) and schedules it via cron at 23:55.
 
 ### Usage
 
 ```bash
-/u01/app/scripts/backup-k8s-config.sh
-BACKUP_DST=/mnt/cfg RETENTION_DAYS=30 /u01/app/scripts/backup-k8s-config.sh
+/u01/app/scripts/backup/backup-k8s-config.sh
+BACKUP_DST=/mnt/cfg RETENTION_DAYS=30 /u01/app/scripts/backup/backup-k8s-config.sh
 ```
 
 ### Behavior

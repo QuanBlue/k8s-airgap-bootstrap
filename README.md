@@ -64,7 +64,7 @@
 
 See it in action:
 
-- **Bootstrap wizard**: `./scripts/bootstrap.sh` — interactive node topology, VIP, audit, data-partition config.
+- **Bootstrap wizard**: `./scripts/bootstrap.sh` — interactive node topology, VIP, audit, data-partition config, plus firewall-related `node_cidr`, SOC, and DB endpoints.
 - **Full deploy**: `ansible-playbook playbooks/site.yml` — `prepare → ha → kubernetes → addons → hardening` in one command.
 - **Tag-driven re-runs**: `--tags addons` or `--tags hardening` to re-apply just one slice without re-running the whole pipeline.
 
@@ -77,8 +77,9 @@ See it in action:
 - **Configurable data partition** — every filesystem-heavy path (containerd root, kubelet pod logs, audit logs, offline images, backups) follows one wizard prompt.
 - **Automated backups** — daily cron at 23:55: etcd snapshot on every master (local member) + Kubernetes config archive (`/etc/kubernetes`, kubelet, kubeadm) on every node, both with 90-day rotation.
 - **Host firewall** — optional iptables role (prompted, default on) that shields the control-plane/etcd/kubelet ports to cluster-internal access only; admins reach the API via HAProxy `8443`, while SSH, worker VIP `80/443`, and NodePort stay open. Rules persist via `iptables-persistent`.
+  Manual chain/rule customization guide: [`docs/iptables-customization.md`](docs/iptables-customization.md)
 - **Idempotent** — playbooks detect stale state and self-heal (auto-reset+init on a dead apiserver, rename-or-skip for app user, replace-without-duplicates for hardening patches).
-- **Interactive wizard** — `bootstrap.sh` walks through cluster identity, topology, master VIP, optional worker VIP, network CIDRs, Calico autodetection, and data partition root — every prompt has a sensible default.
+- **Interactive wizard** — `bootstrap.sh` walks through cluster identity, topology, master VIP, optional worker VIP, network CIDRs, Calico autodetection, data partition root, and optional SOC/DB firewall endpoints — every prompt has a sensible default.
 - **Dynamic topology** — any master/worker count, IPs prompted per node, hostnames templated as `<Short>-<Env>[-Cluster<N>]-K8s-Master|Worker-NN`.
 - **Cluster operations UX** — `k9s` installed on every master for both `root` and the application user.
 - **Full teardown** — `playbooks/teardown.yml` reverses everything `site.yml` installed.
@@ -258,8 +259,10 @@ Full reference (args, env vars, output paths, idempotency notes): [`docs/scripts
 scripts/
 ├── bootstrap.sh                  # interactive wizard (also `--rollback` to undo latest run)
 ├── download-artifacts.sh         # offline artifact pull/build
-├── backup-etcd.sh                # etcd snapshot (deployed to masters by the backup role)
-├── backup-k8s-config.sh          # k8s config archive (deployed to every node)
+├── servers/
+│   └── backup/
+│       ├── backup-etcd.sh        # etcd snapshot (deployed to masters by the backup role)
+│       └── backup-k8s-config.sh  # k8s config archive (deployed to every node)
 └── helpers/
     ├── generate-inventory.sh     # invoked by bootstrap.sh
     └── load-images.sh            # invoked by the containerd role
@@ -272,8 +275,8 @@ scripts/
 | `./scripts/download-artifacts.sh` | Downloads every offline artifact (DEBs, binaries, HAProxy source build, images) |
 | `./scripts/helpers/generate-inventory.sh` | Generates `inventories/inventory.ini` from CLI args (called by `bootstrap.sh`) |
 | `./scripts/helpers/load-images.sh` | Imports container image tarballs into containerd (run by Ansible) |
-| `./scripts/backup-etcd.sh` | Daily etcd snapshot of the local member (deployed + scheduled by the backup role) |
-| `./scripts/backup-k8s-config.sh` | Daily archive of `/etc/kubernetes` + kubelet/kubeadm config (deployed + scheduled by the backup role) |
+| `./scripts/servers/backup/backup-etcd.sh` | Daily etcd snapshot of the local member (deployed + scheduled by the backup role) |
+| `./scripts/servers/backup/backup-k8s-config.sh` | Daily archive of `/etc/kubernetes` + kubelet/kubeadm config (deployed + scheduled by the backup role) |
 
 # :lock: CIS Hardening
 

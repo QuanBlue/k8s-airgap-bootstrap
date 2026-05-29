@@ -26,14 +26,42 @@
   environment:
     DEBIAN_FRONTEND: noninteractive
 
-- name: Render host firewall script
-  ansible.builtin.template:
-    src: apply-firewall.sh.j2
-    dest: /usr/local/sbin/k8s-apply-firewall.sh
+- name: Fail if node_role is not supported
+  ansible.builtin.fail:
+    msg: "Unsupported node_role '{{ node_role | default('<undefined>') }}'. Expected 'master' or 'worker'."
+  when: node_role | default('') not in ['master', 'worker']
+
+- name: Check rendered firewall script exists in repo
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../scripts/servers/iptables/k8s-{{ node_role }}-iptables-rules.sh"
+  delegate_to: localhost
+  become: false
+  register: firewall_script_src
+
+- name: Fail if rendered firewall script is missing
+  ansible.builtin.fail:
+    msg: >-
+      Missing firewall source-of-truth script:
+      {{ playbook_dir }}/../scripts/servers/iptables/k8s-{{ node_role }}-iptables-rules.sh.
+      Restore or recreate the script in scripts/servers/iptables/.
+      Re-run ./scripts/bootstrap.sh only to sync the bootstrap-managed value block.
+  when: not firewall_script_src.stat.exists
+
+- name: Ensure firewall scripts directory exists
+  ansible.builtin.file:
+    path: "{{ firewall.scripts_dir }}"
+    state: directory
     owner: root
     group: root
     mode: "0750"
-  register: fw_script
+
+- name: Install rendered server-side iptables script for this node role
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../scripts/servers/iptables/k8s-{{ node_role }}-iptables-rules.sh"
+    dest: "{{ firewall.scripts_dir }}/k8s-{{ node_role }}-iptables-rules.sh"
+    owner: root
+    group: root
+    mode: "0750"
 
 - name: Capture iptables state before apply
   ansible.builtin.command: iptables-save
@@ -41,7 +69,7 @@
   changed_when: false
 
 - name: Apply host firewall rules
-  ansible.builtin.command: /usr/local/sbin/k8s-apply-firewall.sh
+  ansible.builtin.command: "{{ firewall.scripts_dir }}/k8s-{{ node_role }}-iptables-rules.sh"
   changed_when: false
 
 - name: Capture iptables state after apply

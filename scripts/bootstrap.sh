@@ -142,10 +142,24 @@ ensure_optional_positive_integer() {
     if [[ -n "$value" ]]; then ensure_positive_integer "$value" "$label"; fi
 }
 
+ensure_non_negative_integer() {
+    local value="$1" label="$2"
+    if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+        err "${label} phải là số nguyên không âm."
+    fi
+}
+
 ensure_ipv4() {
     local value="$1" label="$2"
     if ! [[ "$value" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
         err "${label}: '${value}' không phải IPv4 hợp lệ."
+    fi
+}
+
+ensure_cidr() {
+    local value="$1" label="$2"
+    if ! [[ "$value" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]|[1-2][0-9]|3[0-2])$ ]]; then
+        err "${label}: '${value}' không phải CIDR IPv4 hợp lệ."
     fi
 }
 
@@ -188,6 +202,218 @@ collect_node_ips() {
     done
 
     printf -v "$__result_var" '%s' "$(IFS=,; echo "${collected_ips[*]}")"
+}
+
+collect_ip_list() {
+    local list_label="$1"
+    local count="$2"
+    local __result_var="$3"
+    local collected_ips=()
+    local item_ip
+    local default_ip="10.0.0.10"
+
+    if [[ "$count" -eq 0 ]]; then
+        printf -v "$__result_var" '%s' ""
+        return
+    fi
+
+    echo -e "  ${BOLD}${BLUE}▸ ${list_label}${NC}"
+    divider
+    for ((i=1; i<=count; i++)); do
+        ask_inline item_ip "${list_label} ${i}" "$default_ip"
+        ensure_ipv4 "$item_ip" "${list_label} ${i}"
+        collected_ips+=("$item_ip")
+    done
+
+    printf -v "$__result_var" '%s' "$(IFS=,; echo "${collected_ips[*]}")"
+}
+
+collect_ip_list_with_defaults() {
+    local list_label="$1"
+    local count="$2"
+    local defaults_csv="$3"
+    local __result_var="$4"
+    local collected_ips=()
+    local default_ips=()
+    local item_ip default_ip
+
+    if [[ "$count" -eq 0 ]]; then
+        printf -v "$__result_var" '%s' ""
+        return
+    fi
+
+    IFS=',' read -r -a default_ips <<< "$defaults_csv"
+
+    echo -e "  ${BOLD}${BLUE}▸ ${list_label}${NC}"
+    divider
+    for ((i=1; i<=count; i++)); do
+        default_ip="${default_ips[$((i-1))]:-10.0.0.10}"
+        ask_inline item_ip "${list_label} ${i}" "$default_ip"
+        ensure_ipv4 "$item_ip" "${list_label} ${i}"
+        collected_ips+=("$item_ip")
+    done
+
+    printf -v "$__result_var" '%s' "$(IFS=,; echo "${collected_ips[*]}")"
+}
+
+csv_to_yaml_inline_list() {
+    local csv="$1"
+    local output=""
+    local item
+
+    if [[ -z "$csv" ]]; then
+        echo "[]"
+        return
+    fi
+
+    IFS=',' read -r -a _items <<< "$csv"
+    for item in "${_items[@]}"; do
+        if [[ -n "$output" ]]; then
+            output+=", "
+        fi
+        output+="\"$item\""
+    done
+    echo "[$output]"
+}
+
+csv_to_bash_array() {
+    local csv="$1"
+    local output=""
+    local item
+
+    if [[ -z "$csv" ]]; then
+        echo "()"
+        return
+    fi
+
+    IFS=',' read -r -a _items <<< "$csv"
+    for item in "${_items[@]}"; do
+        output+=" \"$item\""
+    done
+    echo "(${output# })"
+}
+
+render_iptables_scripts() {
+    local worker_script="scripts/servers/iptables/k8s-worker-iptables-rules.sh"
+    local master_script="scripts/servers/iptables/k8s-master-iptables-rules.sh"
+    local master_vip_value=""
+    local worker_vip_value=""
+    local prometheus_scraper_array=""
+    local teleport_proxy_array=""
+    local ntp_server_array=""
+    local soc_nsm_array=""
+    local soc_forwarder_array=""
+    local mongodb_array=""
+    local mariadb_array=""
+    local dorisdb_array=""
+    local begin_marker="# BEGIN BOOTSTRAP VALUES"
+    local end_marker="# END BOOTSTRAP VALUES"
+    local master_values_file=""
+    local worker_values_file=""
+
+    mkdir -p "scripts/servers/iptables"
+
+    if [[ "$VIP_ENABLED" == "true" ]]; then
+        master_vip_value="$VIP_ADDRESS"
+    fi
+
+    if [[ "$WORKER_HA_ENABLED" == "true" ]]; then
+        worker_vip_value="$WORKER_HA_ADDRESS"
+    fi
+
+    prometheus_scraper_array=$(csv_to_bash_array "$PROMETHEUS_SCRAPER_IPS")
+    teleport_proxy_array=$(csv_to_bash_array "$TELEPORT_PROXY_IPS")
+    ntp_server_array=$(csv_to_bash_array "$NTP_SERVER_IPS")
+    soc_nsm_array=$(csv_to_bash_array "$SOC_NSM_IPS")
+    soc_forwarder_array=$(csv_to_bash_array "$SOC_FORWARDER_IPS")
+    mongodb_array=$(csv_to_bash_array "$MONGODB_IPS")
+    mariadb_array=$(csv_to_bash_array "$MARIADB_IPS")
+    dorisdb_array=$(csv_to_bash_array "$DORISDB_IPS")
+
+    write_master_iptables_values() {
+        cat <<EOF
+NODE_CIDR="$NODE_CIDR"
+POD_CIDR="$POD_CIDR"
+SVC_CIDR="$SERVICE_CIDR"
+MASTER_VIP="$master_vip_value"
+WORKER_VIP="$worker_vip_value"
+PROMETHEUS_SCRAPER_IPS=$prometheus_scraper_array
+TELEPORT_PROXY_IPS=$teleport_proxy_array
+NTP_SERVER_IPS=$ntp_server_array
+SOC_NSM_IPS=$soc_nsm_array
+SOC_FORWARDER_IPS=$soc_forwarder_array
+EOF
+    }
+
+    write_worker_iptables_values() {
+        cat <<EOF
+NODE_CIDR="$NODE_CIDR"
+POD_CIDR="$POD_CIDR"
+SVC_CIDR="$SERVICE_CIDR"
+MASTER_VIP="$master_vip_value"
+WORKER_VIP="$worker_vip_value"
+MONGODB_IPS=$mongodb_array
+MARIADB_IPS=$mariadb_array
+DORISDB_IPS=$dorisdb_array
+PROMETHEUS_SCRAPER_IPS=$prometheus_scraper_array
+TELEPORT_PROXY_IPS=$teleport_proxy_array
+NTP_SERVER_IPS=$ntp_server_array
+SOC_NSM_IPS=$soc_nsm_array
+SOC_FORWARDER_IPS=$soc_forwarder_array
+EOF
+    }
+
+    replace_managed_block() {
+        local target_file="$1"
+        local replacement_file="$2"
+        local tmp_file
+
+        [[ -f "$target_file" ]] || err "Missing firewall source-of-truth script: $target_file"
+        grep -qF "$begin_marker" "$target_file" || err "Missing begin marker in $target_file"
+        grep -qF "$end_marker" "$target_file" || err "Missing end marker in $target_file"
+
+        tmp_file=$(mktemp)
+        awk \
+            -v begin="$begin_marker" \
+            -v end="$end_marker" \
+            -v replacement="$replacement_file" '
+                BEGIN {
+                    while ((getline line < replacement) > 0) {
+                        replacement_lines[++replacement_count] = line
+                    }
+                    close(replacement)
+                }
+                $0 == begin {
+                    print
+                    for (i = 1; i <= replacement_count; i++) {
+                        print replacement_lines[i]
+                    }
+                    in_block = 1
+                    next
+                }
+                $0 == end {
+                    in_block = 0
+                    print
+                    next
+                }
+                !in_block {
+                    print
+                }
+            ' "$target_file" > "$tmp_file"
+        mv "$tmp_file" "$target_file"
+    }
+
+    master_values_file=$(mktemp)
+    worker_values_file=$(mktemp)
+    trap 'rm -f "$master_values_file" "$worker_values_file"' RETURN
+
+    write_master_iptables_values > "$master_values_file"
+    write_worker_iptables_values > "$worker_values_file"
+
+    replace_managed_block "$master_script" "$master_values_file"
+    replace_managed_block "$worker_script" "$worker_values_file"
+
+    chmod 0755 "$master_script" "$worker_script"
 }
 
 backup_file() {
@@ -316,6 +542,21 @@ VIP_INTERFACE=""
 WORKER_HA_ENABLED="false"
 WORKER_HA_ADDRESS=""
 WORKER_HA_INTERFACE=""
+HAS_PROMETHEUS="true"
+PROMETHEUS_SCRAPER_IPS="10.129.0.158,10.129.0.159,10.129.0.160,10.129.0.163,10.129.0.164,10.129.0.165"
+DEFAULT_PROMETHEUS_SCRAPER_IPS="$PROMETHEUS_SCRAPER_IPS"
+HAS_TELEPORT="true"
+TELEPORT_PROXY_IPS="10.129.0.232"
+DEFAULT_TELEPORT_PROXY_IPS="$TELEPORT_PROXY_IPS"
+HAS_NTP_SERVERS="false"
+NTP_SERVER_IPS=""
+HAS_SOC="false"
+SOC_NSM_IPS=""
+SOC_FORWARDER_IPS=""
+HAS_EXTERNAL_DB="false"
+MONGODB_IPS=""
+MARIADB_IPS=""
+DORISDB_IPS=""
 
 if [ "$MASTER_COUNT" -gt 1 ]; then
     section "High Availability"
@@ -367,7 +608,10 @@ section "Cluster Network"
 ask_inline K8S_VERSION "Kubernetes version" "1.36.0";
 ask_inline POD_CIDR     "Pod CIDR"           "10.244.0.0/16";
 ask_inline SERVICE_CIDR "Service CIDR"       "10.96.0.0/12"; 
+ask_inline NODE_CIDR    "Node CIDR"          "10.0.6.0/24";
 echo
+
+ensure_cidr "$NODE_CIDR" "Node CIDR"
 
 ask CALICO_IP_AUTODETECTION "Calico IP autodetection" "first-found" \
     "Cách Calico chọn IP node khi có nhiều interface.\n    · interface=eth0       — chỉ định tên interface\n    · cidr=10.129.0.0/16   — chọn interface có IP thuộc dải này  ← khuyên dùng\n    · first-found          — lấy interface đầu tiên (dễ chọn sai)"
@@ -386,21 +630,136 @@ else
     FIREWALL_ENABLED="false"
 fi
 
+ask HAS_PROMETHEUS_PROMPT "Has Prometheus scrapers?" "yes" \
+    "Nếu có Prometheus ngoài cụm scrape node, wizard sẽ render allowlist inbound TCP 9000:9300.\n    Mặc định dùng các IP Prometheus chuẩn hiện tại: ${PROMETHEUS_SCRAPER_IPS}." \
+    "(yes/no)"
+
+if [[ "$HAS_PROMETHEUS_PROMPT" == "yes" || "$HAS_PROMETHEUS_PROMPT" == "y" ]]; then
+    HAS_PROMETHEUS="true"
+
+    ask_inline PROMETHEUS_SCRAPER_COUNT "Prometheus scrapers" "6"
+    ensure_non_negative_integer "$PROMETHEUS_SCRAPER_COUNT" "Prometheus scrapers"
+    echo
+    collect_ip_list_with_defaults "Prometheus scraper IP" "$PROMETHEUS_SCRAPER_COUNT" "$DEFAULT_PROMETHEUS_SCRAPER_IPS" PROMETHEUS_SCRAPER_IPS
+    echo
+
+    if [[ -z "$PROMETHEUS_SCRAPER_IPS" ]]; then
+        HAS_PROMETHEUS="false"
+    fi
+else
+    HAS_PROMETHEUS="false"
+    PROMETHEUS_SCRAPER_IPS=""
+fi
+
+ask HAS_TELEPORT_PROMPT "Has Teleport?" "yes" \
+    "Nếu node chạy Teleport agent/client, wizard sẽ hỏi IP Teleport Proxy/Auth ngoài cụm.\n    Mặc định dùng ${TELEPORT_PROXY_IPS}, rule outbound TCP cố định là 443/3080/3024." \
+    "(yes/no)"
+
+if [[ "$HAS_TELEPORT_PROMPT" == "yes" || "$HAS_TELEPORT_PROMPT" == "y" ]]; then
+    HAS_TELEPORT="true"
+
+    ask_inline TELEPORT_PROXY_COUNT "Teleport Proxy/Auth servers" "1"
+    ensure_non_negative_integer "$TELEPORT_PROXY_COUNT" "Teleport Proxy/Auth servers"
+    echo
+    collect_ip_list_with_defaults "Teleport Proxy/Auth IP" "$TELEPORT_PROXY_COUNT" "$DEFAULT_TELEPORT_PROXY_IPS" TELEPORT_PROXY_IPS
+    echo
+
+    if [[ -z "$TELEPORT_PROXY_IPS" ]]; then
+        HAS_TELEPORT="false"
+    fi
+else
+    TELEPORT_PROXY_IPS=""
+fi
+
+ask HAS_NTP_PROMPT "Use fixed NTP servers?" "no" \
+    "Nếu muốn siết NTP egress, wizard sẽ hỏi IP NTP server và chỉ allow UDP 123 tới các IP đó.\n    Trả lời no để giữ fallback DNS/NTP outbound hiện tại." \
+    "(yes/no)"
+
+if [[ "$HAS_NTP_PROMPT" == "yes" || "$HAS_NTP_PROMPT" == "y" ]]; then
+    HAS_NTP_SERVERS="true"
+
+    ask_inline NTP_SERVER_COUNT "NTP servers" "1"
+    ensure_non_negative_integer "$NTP_SERVER_COUNT" "NTP servers"
+    echo
+    collect_ip_list "NTP server IP" "$NTP_SERVER_COUNT" NTP_SERVER_IPS
+    echo
+
+    if [[ -z "$NTP_SERVER_IPS" ]]; then
+        HAS_NTP_SERVERS="false"
+    fi
+fi
+
+ask HAS_SOC_PROMPT "Has SOC?" "no" \
+    "Nếu có hệ SOC ngoài cụm, wizard sẽ hỏi IP cho SOC NSM và SOC Forwarder.\n    Mỗi IP sẽ được render thành rule outbound riêng trong script iptables." \
+    "(yes/no)"
+
+if [[ "$HAS_SOC_PROMPT" == "yes" || "$HAS_SOC_PROMPT" == "y" ]]; then
+    HAS_SOC="true"
+
+    ask_inline SOC_NSM_COUNT "SOC NSM servers" "1"
+    ensure_non_negative_integer "$SOC_NSM_COUNT" "SOC NSM servers"
+    echo
+    collect_ip_list "SOC NSM IP" "$SOC_NSM_COUNT" SOC_NSM_IPS
+    echo
+
+    ask_inline SOC_FORWARDER_COUNT "SOC Forwarders" "1"
+    ensure_non_negative_integer "$SOC_FORWARDER_COUNT" "SOC Forwarders"
+    echo
+    collect_ip_list "SOC Forwarder IP" "$SOC_FORWARDER_COUNT" SOC_FORWARDER_IPS
+    echo
+
+    if [[ -z "$SOC_NSM_IPS" && -z "$SOC_FORWARDER_IPS" ]]; then
+        HAS_SOC="false"
+    fi
+fi
+
+ask HAS_EXTERNAL_DB_PROMPT "Has DB connection?" "no" \
+    "Nếu worker cần đi ra DB ngoài cụm, wizard sẽ hỏi số lượng và IP theo từng loại: MongoDB, MariaDB, DorisDB." \
+    "(yes/no)"
+
+if [[ "$HAS_EXTERNAL_DB_PROMPT" == "yes" || "$HAS_EXTERNAL_DB_PROMPT" == "y" ]]; then
+    HAS_EXTERNAL_DB="true"
+
+    ask_inline MONGODB_COUNT "MongoDB servers" "1"
+    ensure_non_negative_integer "$MONGODB_COUNT" "MongoDB servers"
+    echo
+    collect_ip_list "MongoDB IP" "$MONGODB_COUNT" MONGODB_IPS
+    echo
+
+    ask_inline MARIADB_COUNT "MariaDB servers" "1"
+    ensure_non_negative_integer "$MARIADB_COUNT" "MariaDB servers"
+    echo
+    collect_ip_list "MariaDB IP" "$MARIADB_COUNT" MARIADB_IPS
+    echo
+
+    ask_inline DORISDB_COUNT "DorisDB servers" "1"
+    ensure_non_negative_integer "$DORISDB_COUNT" "DorisDB servers"
+    echo
+    collect_ip_list "DorisDB IP" "$DORISDB_COUNT" DORISDB_IPS
+    echo
+
+    if [[ -z "$MONGODB_IPS" && -z "$MARIADB_IPS" && -z "$DORISDB_IPS" ]]; then
+        HAS_EXTERNAL_DB="false"
+    fi
+fi
+
 if [[ -n "$DATA_PARTITION_ROOT" ]]; then
     DATA_PARTITION_ROOT="${DATA_PARTITION_ROOT%/}"
     CONTAINERD_ROOT_DIR="${DATA_PARTITION_ROOT}/lib/containerd"
     OFFLINE_IMAGES_DIR="${DATA_PARTITION_ROOT}/lib/k8s-offline-images"
     KUBELET_POD_LOGS_DIR="${DATA_PARTITION_ROOT}/log/containerd"
     AUDIT_LOG_DIR="${DATA_PARTITION_ROOT}/log/kubernetes/audit"
-    BACKUP_SCRIPTS_DIR="${DATA_PARTITION_ROOT}/scripts"
+    BACKUP_SCRIPTS_DIR="${DATA_PARTITION_ROOT}/scripts/backup"
     BACKUP_DEST_ROOT="${DATA_PARTITION_ROOT}/backup"
+    FIREWALL_SCRIPTS_DIR="${DATA_PARTITION_ROOT}/scripts/iptables"
 else
     CONTAINERD_ROOT_DIR="/var/lib/containerd"
     OFFLINE_IMAGES_DIR="/var/lib/k8s-offline-images"
     KUBELET_POD_LOGS_DIR=""
     AUDIT_LOG_DIR="/var/log/kubernetes/audit"
-    BACKUP_SCRIPTS_DIR="/opt/k8s-backup/scripts"
+    BACKUP_SCRIPTS_DIR="/opt/k8s-backup/scripts/backup"
     BACKUP_DEST_ROOT="/var/backups/k8s"
+    FIREWALL_SCRIPTS_DIR="/opt/k8s-firewall/scripts/iptables"
 fi
 
 # ─── Generate Files ───────────────────────────────────────────────────────────
@@ -426,6 +785,15 @@ bash ./scripts/helpers/generate-inventory.sh \
     --ansible-user                 "$ANSIBLE_USER" \
     --ansible-ssh-private-key-file "$ANSIBLE_SSH_PRIVATE_KEY_FILE"
 
+SOC_NSM_YAML=$(csv_to_yaml_inline_list "$SOC_NSM_IPS")
+SOC_FORWARDER_YAML=$(csv_to_yaml_inline_list "$SOC_FORWARDER_IPS")
+PROMETHEUS_SCRAPER_YAML=$(csv_to_yaml_inline_list "$PROMETHEUS_SCRAPER_IPS")
+TELEPORT_PROXY_YAML=$(csv_to_yaml_inline_list "$TELEPORT_PROXY_IPS")
+NTP_SERVER_YAML=$(csv_to_yaml_inline_list "$NTP_SERVER_IPS")
+MONGODB_YAML=$(csv_to_yaml_inline_list "$MONGODB_IPS")
+MARIADB_YAML=$(csv_to_yaml_inline_list "$MARIADB_IPS")
+DORISDB_YAML=$(csv_to_yaml_inline_list "$DORISDB_IPS")
+
 cat <<EOF > inventories/group_vars/all.yml
 ---
 cluster_name: "$CLUSTER_NAME"
@@ -437,6 +805,7 @@ kubernetes_version: "$K8S_VERSION"
 
 # Networking
 network:
+  node_cidr: "$NODE_CIDR"
   pod_cidr: "$POD_CIDR"
   service_cidr: "$SERVICE_CIDR"
 
@@ -502,8 +871,30 @@ backup:
 # Host firewall (iptables) — bảo vệ port control-plane/etcd/kubelet
 firewall:
   enabled: $FIREWALL_ENABLED
+  scripts_dir: "$FIREWALL_SCRIPTS_DIR"
   nodeport_open: true
   admin_cidrs: []
+
+external_services:
+  prometheus:
+    enabled: $HAS_PROMETHEUS
+    scraper_ips: $PROMETHEUS_SCRAPER_YAML
+  teleport:
+    enabled: $HAS_TELEPORT
+    proxy_ips: $TELEPORT_PROXY_YAML
+  ntp:
+    enabled: $HAS_NTP_SERVERS
+    server_ips: $NTP_SERVER_YAML
+  soc:
+    enabled: $HAS_SOC
+    nsm_ips: $SOC_NSM_YAML
+    forwarder_ips: $SOC_FORWARDER_YAML
+
+external_databases:
+  enabled: $HAS_EXTERNAL_DB
+  mongodb_ips: $MONGODB_YAML
+  mariadb_ips: $MARIADB_YAML
+  dorisdb_ips: $DORISDB_YAML
 EOF
 
 cat <<EOF > inventories/group_vars/masters.yml
@@ -515,6 +906,8 @@ cat <<EOF > inventories/group_vars/workers.yml
 ---
 node_role: worker
 EOF
+
+render_iptables_scripts
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
 echo
