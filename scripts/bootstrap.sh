@@ -116,6 +116,22 @@ ask_inline() {
     printf -v "$var_name" '%s' "${input_value:-$default_value}"
 }
 
+ask_inline_non_negative_integer() {
+    local var_name="$1"
+    local label="$2"
+    local default_value="$3"
+    local prompt_value=""
+
+    while true; do
+        ask_inline prompt_value "$label" "$default_value"
+        if [[ "$prompt_value" =~ ^[0-9]+$ ]]; then
+            printf -v "$var_name" '%s' "$prompt_value"
+            return
+        fi
+        echo -e "  ${YELLOW}✗  ${label} phải là số nguyên không âm. Vui lòng nhập lại.${NC}"
+    done
+}
+
 info_line() {
     echo -e "  ${YELLOW}ℹ${NC}  $1"
 }
@@ -298,6 +314,7 @@ render_iptables_scripts() {
     local master_script="scripts/servers/iptables/k8s-master-iptables-rules.sh"
     local master_vip_value=""
     local worker_vip_value=""
+    local haproxy_8443_allow_array=""
     local prometheus_scraper_array=""
     local teleport_proxy_array=""
     local ntp_server_array=""
@@ -322,6 +339,7 @@ render_iptables_scripts() {
     fi
 
     prometheus_scraper_array=$(csv_to_bash_array "$PROMETHEUS_SCRAPER_IPS")
+    haproxy_8443_allow_array=$(csv_to_bash_array "$HAPROXY_8443_ALLOW_IPS")
     teleport_proxy_array=$(csv_to_bash_array "$TELEPORT_PROXY_IPS")
     ntp_server_array=$(csv_to_bash_array "$NTP_SERVER_IPS")
     soc_nsm_array=$(csv_to_bash_array "$SOC_NSM_IPS")
@@ -337,6 +355,7 @@ POD_CIDR="$POD_CIDR"
 SVC_CIDR="$SERVICE_CIDR"
 MASTER_VIP="$master_vip_value"
 WORKER_VIP="$worker_vip_value"
+HAPROXY_8443_ALLOW_IPS=$haproxy_8443_allow_array
 PROMETHEUS_SCRAPER_IPS=$prometheus_scraper_array
 TELEPORT_PROXY_IPS=$teleport_proxy_array
 NTP_SERVER_IPS=$ntp_server_array
@@ -557,6 +576,7 @@ HAS_EXTERNAL_DB="false"
 MONGODB_IPS=""
 MARIADB_IPS=""
 DORISDB_IPS=""
+HAPROXY_8443_ALLOW_IPS=""
 
 if [ "$MASTER_COUNT" -gt 1 ]; then
     section "High Availability"
@@ -584,7 +604,7 @@ fi
 
 if [ "$WORKER_COUNT" -gt 0 ]; then
     ask ENABLE_WORKER_HA "Enable worker VIP?" "no" \
-        "Bật VIP riêng cho ingress/application traffic trên nhóm worker.\n    Keepalived + HAProxy sẽ chạy trên mọi worker và mở ${BOLD}80/443${NC}.\n    HAProxy forward tới chính các worker ở 30080/30443." \
+        "Bật VIP riêng cho ingress/application traffic trên nhóm worker.\n    Keepalived + HAProxy sẽ chạy trên mọi worker và mở ${BOLD}80/443${NC}." \
         "(yes/no)"
 
     if [[ "$ENABLE_WORKER_HA" == "yes" || "$ENABLE_WORKER_HA" == "y" ]]; then
@@ -628,6 +648,23 @@ if [[ "$ENABLE_FIREWALL" == "yes" || "$ENABLE_FIREWALL" == "y" ]]; then
     FIREWALL_ENABLED="true"
 else
     FIREWALL_ENABLED="false"
+fi
+
+if [[ "$FIREWALL_ENABLED" == "true" ]]; then
+    ask RESTRICT_HAPROXY_8443_PROMPT "Restrict external access to HAProxy public 8443 by IP?" "no" \
+        "Nếu trả lời yes, wizard sẽ render allowlist inbound TCP 8443 trên master chỉ cho các external IP đã nhập.\n    Dù chọn no hay để danh sách rỗng, 8443 vẫn chỉ cho node trong cụm và các IP được allow rõ ràng truy cập, không mở all." \
+        "(yes/no)"
+
+    if [[ "$RESTRICT_HAPROXY_8443_PROMPT" == "yes" || "$RESTRICT_HAPROXY_8443_PROMPT" == "y" ]]; then
+        ask_inline_non_negative_integer HAPROXY_8443_ALLOW_COUNT "Number of Allowed external IPs for HAProxy (8443)" "1"
+        echo
+        collect_ip_list "Allowed external IP for 8443" "$HAPROXY_8443_ALLOW_COUNT" HAPROXY_8443_ALLOW_IPS
+        echo
+    else
+        HAPROXY_8443_ALLOW_IPS=""
+    fi
+else
+    HAPROXY_8443_ALLOW_IPS=""
 fi
 
 ask HAS_PROMETHEUS_PROMPT "Has Prometheus scrapers?" "yes" \
@@ -696,13 +733,13 @@ ask HAS_SOC_PROMPT "Has SOC?" "no" \
 if [[ "$HAS_SOC_PROMPT" == "yes" || "$HAS_SOC_PROMPT" == "y" ]]; then
     HAS_SOC="true"
 
-    ask_inline SOC_NSM_COUNT "SOC NSM servers" "1"
+    ask_inline SOC_NSM_COUNT "Number of SOC NSM servers" "1"
     ensure_non_negative_integer "$SOC_NSM_COUNT" "SOC NSM servers"
     echo
     collect_ip_list "SOC NSM IP" "$SOC_NSM_COUNT" SOC_NSM_IPS
     echo
 
-    ask_inline SOC_FORWARDER_COUNT "SOC Forwarders" "1"
+    ask_inline SOC_FORWARDER_COUNT "Number of SOC Forwarders" "1"
     ensure_non_negative_integer "$SOC_FORWARDER_COUNT" "SOC Forwarders"
     echo
     collect_ip_list "SOC Forwarder IP" "$SOC_FORWARDER_COUNT" SOC_FORWARDER_IPS
@@ -720,19 +757,19 @@ ask HAS_EXTERNAL_DB_PROMPT "Has DB connection?" "no" \
 if [[ "$HAS_EXTERNAL_DB_PROMPT" == "yes" || "$HAS_EXTERNAL_DB_PROMPT" == "y" ]]; then
     HAS_EXTERNAL_DB="true"
 
-    ask_inline MONGODB_COUNT "MongoDB servers" "1"
+    ask_inline MONGODB_COUNT "Number of ongoDB servers" "1"
     ensure_non_negative_integer "$MONGODB_COUNT" "MongoDB servers"
     echo
     collect_ip_list "MongoDB IP" "$MONGODB_COUNT" MONGODB_IPS
     echo
 
-    ask_inline MARIADB_COUNT "MariaDB servers" "1"
+    ask_inline MARIADB_COUNT "Number of MariaDB servers" "1"
     ensure_non_negative_integer "$MARIADB_COUNT" "MariaDB servers"
     echo
     collect_ip_list "MariaDB IP" "$MARIADB_COUNT" MARIADB_IPS
     echo
 
-    ask_inline DORISDB_COUNT "DorisDB servers" "1"
+    ask_inline DORISDB_COUNT "Number of DorisDB servers" "1"
     ensure_non_negative_integer "$DORISDB_COUNT" "DorisDB servers"
     echo
     collect_ip_list "DorisDB IP" "$DORISDB_COUNT" DORISDB_IPS
@@ -793,6 +830,7 @@ NTP_SERVER_YAML=$(csv_to_yaml_inline_list "$NTP_SERVER_IPS")
 MONGODB_YAML=$(csv_to_yaml_inline_list "$MONGODB_IPS")
 MARIADB_YAML=$(csv_to_yaml_inline_list "$MARIADB_IPS")
 DORISDB_YAML=$(csv_to_yaml_inline_list "$DORISDB_IPS")
+HAPROXY_8443_ALLOW_YAML=$(csv_to_yaml_inline_list "$HAPROXY_8443_ALLOW_IPS")
 
 cat <<EOF > inventories/group_vars/all.yml
 ---
@@ -874,6 +912,7 @@ firewall:
   scripts_dir: "$FIREWALL_SCRIPTS_DIR"
   nodeport_open: true
   admin_cidrs: []
+  haproxy_8443_allow_ips: $HAPROXY_8443_ALLOW_YAML
 
 external_services:
   prometheus:

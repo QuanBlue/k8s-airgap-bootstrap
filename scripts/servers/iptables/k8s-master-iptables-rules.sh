@@ -11,8 +11,9 @@ CHAIN_OUT="K8S-MASTER-OUT"
 NODE_CIDR="10.0.6.0/24"
 POD_CIDR="10.244.0.0/16"
 SVC_CIDR="10.96.0.0/12"
-MASTER_VIP="10.0.6.99"
-WORKER_VIP="10.0.6.23"
+MASTER_VIP="10.0.6.102"
+WORKER_VIP="10.0.6.122"
+HAPROXY_8443_ALLOW_IPS=("10.0.6.20" "10.0.6.77")
 PROMETHEUS_SCRAPER_IPS=("10.129.0.158" "10.129.0.159" "10.129.0.160" "10.129.0.163" "10.129.0.164" "10.129.0.165")
 TELEPORT_PROXY_IPS=("10.129.0.232")
 NTP_SERVER_IPS=("10.211.2.56")
@@ -93,8 +94,15 @@ iptables -A "$CHAIN_IN" -m comment --comment "master-in: allow igmp multicast fr
 # SSH administration stays reachable from outside.
 iptables -A "$CHAIN_IN" -m comment --comment "master-in: allow ssh" -p tcp --dport 22 -j RETURN
 
-# Clients must reach the API through HAProxy on the master VIP:8443.
-iptables -A "$CHAIN_IN" -m comment --comment "master-in: allow haproxy api vip" -p tcp --dport 8443 -j RETURN
+# Allow HAProxy frontends on masters to accept external traffic on public
+# port 8443 only from explicitly allowed external IPs. Master/worker nodes
+# already match the earlier NODE_CIDR allow rule, so intra-cluster access to
+# the API/LB path keeps working without opening 8443 to all sources.
+if [[ "${#HAPROXY_8443_ALLOW_IPS[@]}" -gt 0 ]]; then
+  for ip in "${HAPROXY_8443_ALLOW_IPS[@]}"; do
+    iptables -A "$CHAIN_IN" -m comment --comment "master-in: allow haproxy public 8443 ip" -s "${ip}/32" -p tcp --dport 8443 -j RETURN
+  done
+fi
 
 for ip in "${PROMETHEUS_SCRAPER_IPS[@]}"; do
   # Prometheus / observability scrapers:
