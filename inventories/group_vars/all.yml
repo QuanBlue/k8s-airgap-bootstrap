@@ -1,6 +1,6 @@
 ---
-cluster_name: "dms4-cluster1"
-project_name: "dms4-cluster1"
+cluster_name: "dms4-cluster"
+project_name: "dms4-cluster"
 project_short_name: "DMS4"
 environment_name: "Prod"
 app_user: "app_vietteldms"
@@ -29,13 +29,13 @@ kubelet:
 # High Availability Settings
 master_ha:
   enabled: true
-  vip_address: "10.0.6.99"
+  vip_address: "10.0.6.102"
   vip_interface: "eth0"
   vip_port: 8443
 
 worker_ha:
   enabled: true
-  vip_address: "10.0.6.23"
+  vip_address: "10.0.6.122"
   vip_interface: "eth0"
   http_port: 80
   https_port: 443
@@ -77,31 +77,25 @@ firewall:
   scripts_dir: "/u01/app/scripts/iptables"
   nodeport_open: true
   admin_cidrs: []
+  haproxy_8443_allow_ips: ["10.0.6.20", "10.0.6.77"]
 
 external_services:
   prometheus:
     enabled: true
-    scraper_ips:
-      - "10.129.0.158"
-      - "10.129.0.159"
-      - "10.129.0.160"
-      - "10.129.0.163"
-      - "10.129.0.164"
-      - "10.129.0.165"
+    scraper_ips: ["10.129.0.158", "10.129.0.159", "10.129.0.160", "10.129.0.163", "10.129.0.164", "10.129.0.165"]
   teleport:
     enabled: true
-    proxy_ips:
-      - "10.129.0.232"
+    proxy_ips: ["10.129.0.232"]
   ntp:
-    enabled: false
-    server_ips: []
+    enabled: true
+    server_ips: ["10.211.2.56"]
   soc:
-    enabled: false
-    nsm_ips: []
-    forwarder_ips: []
+    enabled: true
+    nsm_ips: ["10.0.6.16"]
+    forwarder_ips: ["10.0.6.15"]
 
 external_databases:
-  enabled: false
-  mongodb_ips: []
-  mariadb_ips: []
-  dorisdb_ips: []
+  enabled: true
+  mongodb_ips: ["10.0.0.10"]
+  mariadb_ips: ["10.0.0.10"]
+  dorisdb_ips: ["10.0.0.10"]
